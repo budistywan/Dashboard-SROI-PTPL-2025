@@ -1,736 +1,1127 @@
 <!DOCTYPE html>
 <html lang="id">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>SROI Analyzer — TJSL CSV</title>
-<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-<script src="https://unpkg.com/prop-types@15.8.1/prop-types.min.js"></script>
-<script src="https://unpkg.com/recharts@2.12.7/umd/Recharts.js"></script>
-<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,600;0,700;1,400&family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet">
-<style>
-  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-  :root {
-    --bg: #f8f7f4;
-    --surface: #ffffff;
-    --surface-alt: #f3f2ef;
-    --border: #e8e5df;
-    --border-strong: #d4cfc6;
-    --text-primary: #1a1917;
-    --text-secondary: #6b6760;
-    --text-muted: #a09d97;
-    --accent: #3730a3;
-    --accent-light: #eef2ff;
-    --accent-mid: #818cf8;
-    --success: #166534;
-    --success-light: #f0fdf4;
-    --danger: #b91c1c;
-    --danger-light: #fff0f0;
-    --danger-border: #fecaca;
-    --font-display: 'Lora', Georgia, serif;
-    --font-body: 'DM Sans', system-ui, sans-serif;
-  }
-  html { font-family: var(--font-body); background: var(--bg); color: var(--text-primary); }
-  body { min-height: 100vh; }
-  #root { max-width: 1300px; margin: 0 auto; padding: 24px 20px 64px; }
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>TJSL CSV Analyzer – CRUD 40 Kolom</title>
+  <style>
+    :root {
+      --bg: #f1f5f9;
+      --card: #ffffff;
+      --muted: #64748b;
+      --text: #0f172a;
+      --border: #e2e8f0;
+      --soft: #f8fafc;
+      --primary: #0f172a;
+      --primary-soft: #e2e8f0;
+      --danger: #b91c1c;
+      --danger-soft: #fee2e2;
+      --success-soft: #ecfeff;
+      --radius: 22px;
+      --shadow: 0 1px 2px rgba(15, 23, 42, 0.06), 0 8px 24px rgba(15, 23, 42, 0.04);
+    }
 
-  /* ── TYPOGRAPHY ── */
-  .display { font-family: var(--font-display); }
-  .label-caps { font-size: 10px; font-weight: 700; letter-spacing: 0.13em; text-transform: uppercase; color: var(--text-muted); font-family: var(--font-display); }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: var(--text);
+      background: var(--bg);
+    }
+    button, input, textarea, select {
+      font: inherit;
+    }
+    .container {
+      max-width: 1440px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+    .topbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 16px;
+      margin-bottom: 24px;
+      flex-wrap: wrap;
+    }
+    h1 {
+      margin: 0;
+      font-size: 32px;
+      line-height: 1.15;
+    }
+    .subtitle {
+      margin: 6px 0 0;
+      color: var(--muted);
+    }
+    .actions {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .btn {
+      border: 1px solid var(--border);
+      background: var(--card);
+      color: var(--text);
+      padding: 12px 16px;
+      border-radius: 16px;
+      cursor: pointer;
+      transition: .2s ease;
+      font-weight: 600;
+    }
+    .btn:hover { transform: translateY(-1px); box-shadow: var(--shadow); }
+    .btn.primary {
+      background: var(--primary);
+      color: white;
+      border-color: var(--primary);
+    }
+    .btn.danger {
+      background: var(--danger);
+      color: white;
+      border-color: var(--danger);
+    }
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+    .stat-card, .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 28px;
+      box-shadow: var(--shadow);
+    }
+    .stat-card {
+      padding: 20px;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 12px;
+      min-height: 140px;
+    }
+    .stat-title {
+      color: var(--muted);
+      font-size: 14px;
+      margin-bottom: 10px;
+    }
+    .stat-value {
+      font-size: 34px;
+      font-weight: 800;
+      line-height: 1.05;
+      word-break: break-word;
+    }
+    .stat-helper {
+      margin-top: 8px;
+      color: #94a3b8;
+      font-size: 12px;
+      line-height: 1.45;
+    }
+    .stat-icon {
+      min-width: 64px;
+      min-height: 64px;
+      display: grid;
+      place-items: center;
+      background: #f1f5f9;
+      border-radius: 22px;
+      font-size: 28px;
+    }
+    .main-grid {
+      display: grid;
+      grid-template-columns: 340px 1fr;
+      gap: 24px;
+      align-items: start;
+    }
+    .panel-title {
+      margin: 0 0 4px;
+      font-size: 20px;
+    }
+    .panel-head {
+      padding: 20px 20px 0;
+    }
+    .panel-body {
+      padding: 20px;
+    }
+    .search-wrap { position: relative; margin-top: 12px; }
+    .search-wrap input {
+      width: 100%;
+      padding: 12px 14px 12px 40px;
+      border-radius: 16px;
+      border: 1px solid var(--border);
+      background: var(--soft);
+    }
+    .search-icon {
+      position: absolute;
+      left: 14px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: #94a3b8;
+    }
+    .record-list {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      max-height: calc(100vh - 300px);
+      overflow: auto;
+      padding-right: 6px;
+    }
+    .record-item {
+      border: 1px solid var(--border);
+      border-radius: 22px;
+      background: white;
+      padding: 16px;
+      cursor: pointer;
+      transition: .2s ease;
+    }
+    .record-item:hover { background: var(--soft); }
+    .record-item.active {
+      background: var(--primary);
+      color: white;
+      border-color: var(--primary);
+    }
+    .record-item .meta {
+      margin-top: 8px;
+      font-size: 12px;
+      opacity: .8;
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      padding: 6px 10px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      font-size: 12px;
+      background: white;
+      gap: 6px;
+    }
+    .record-item.active .badge {
+      background: rgba(255,255,255,.12);
+      border-color: rgba(255,255,255,.16);
+      color: white;
+    }
+    .detail-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+      margin-bottom: 12px;
+      flex-wrap: wrap;
+    }
+    .hero-card {
+      padding: 22px;
+      background: linear-gradient(135deg, #f8fafc 0%, #ffffff 100%);
+      border: 1px solid var(--border);
+      border-radius: 28px;
+      box-shadow: var(--shadow);
+    }
+    .hero-card h2 {
+      margin: 0 0 12px;
+      font-size: 30px;
+    }
+    .badges { display: flex; gap: 8px; flex-wrap: wrap; }
+    .section-stack { display: flex; flex-direction: column; gap: 14px; margin-top: 14px; }
+    details.section {
+      background: white;
+      border: 1px solid var(--border);
+      border-radius: 24px;
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+    details.section > summary {
+      list-style: none;
+      cursor: pointer;
+      padding: 18px 22px;
+      font-weight: 700;
+      font-size: 18px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    details.section > summary::-webkit-details-marker { display: none; }
+    .summary-arrow { transition: transform .2s ease; }
+    details[open] .summary-arrow { transform: rotate(90deg); }
+    .section-content { padding: 0 22px 22px; }
+    .info-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; }
+    .flow-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+    .info-box, .flow-box, .problem-box {
+      background: var(--soft);
+      border: 1px solid var(--border);
+      border-radius: 22px;
+      padding: 16px;
+      min-height: 120px;
+    }
+    .flow-box { background: white; min-height: 170px; }
+    .box-title {
+      font-size: 13px;
+      color: var(--muted);
+      margin-bottom: 10px;
+      font-weight: 600;
+    }
+    .box-content {
+      font-size: 14px;
+      line-height: 1.7;
+      white-space: pre-wrap;
+    }
+    .problem-stack { display: flex; flex-direction: column; gap: 14px; }
+    .problem-box {
+      background: white;
+    }
+    .problem-title {
+      font-weight: 700;
+      line-height: 1.6;
+    }
+    .problem-meta { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+    .json-box {
+      background: #020617;
+      color: #e2e8f0;
+      border-radius: 24px;
+      padding: 18px;
+      overflow: auto;
+      font-size: 12px;
+      line-height: 1.6;
+      white-space: pre-wrap;
+    }
+    .table-card { margin-top: 14px; }
+    .table-card .panel-head { padding-bottom: 16px; }
+    .accordion-stack { display: flex; flex-direction: column; gap: 12px; }
+    details.table-group {
+      background: white;
+      border: 1px solid var(--border);
+      border-radius: 22px;
+      overflow: hidden;
+    }
+    details.table-group > summary {
+      list-style: none;
+      cursor: pointer;
+      padding: 16px 18px;
+      font-weight: 700;
+      display: flex;
+      justify-content: space-between;
+    }
+    details.table-group > summary::-webkit-details-marker { display: none; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 14px;
+    }
+    th, td {
+      text-align: left;
+      vertical-align: top;
+      padding: 12px 14px;
+      border-top: 1px solid var(--border);
+    }
+    th { background: var(--soft); }
+    .muted { color: var(--muted); }
+    .empty-state {
+      display: grid;
+      place-items: center;
+      min-height: 400px;
+      text-align: center;
+      color: var(--muted);
+    }
+    .modal {
+      position: fixed;
+      inset: 0;
+      background: rgba(15, 23, 42, 0.45);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      z-index: 50;
+    }
+    .modal.open { display: flex; }
+    .modal-card {
+      width: min(1240px, 100%);
+      height: min(90vh, 960px);
+      background: white;
+      border-radius: 28px;
+      box-shadow: var(--shadow);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .modal-head {
+      padding: 20px 24px 0;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+    }
+    .modal-tabs {
+      display: flex;
+      gap: 8px;
+      padding: 16px 24px 0;
+    }
+    .tab-btn {
+      padding: 10px 14px;
+      border-radius: 14px;
+      border: 1px solid var(--border);
+      background: white;
+      cursor: pointer;
+      font-weight: 600;
+    }
+    .tab-btn.active {
+      background: var(--primary);
+      color: white;
+      border-color: var(--primary);
+    }
+    .modal-body {
+      flex: 1;
+      overflow: hidden;
+      padding: 16px 24px 0;
+    }
+    .tab-panel {
+      display: none;
+      height: 100%;
+    }
+    .tab-panel.active { display: block; }
+    .scroll-pane {
+      height: 100%;
+      overflow: auto;
+      padding-right: 8px;
+    }
+    .form-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; }
+    .field {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .field label {
+      font-size: 14px;
+      font-weight: 600;
+    }
+    .field input, .field textarea {
+      width: 100%;
+      border: 1px solid var(--border);
+      background: white;
+      border-radius: 16px;
+      padding: 12px 14px;
+    }
+    .field textarea { min-height: 110px; resize: vertical; }
+    .group-box {
+      border: 1px solid var(--border);
+      border-radius: 22px;
+      padding: 0 16px;
+      margin-top: 14px;
+      background: white;
+    }
+    .group-box summary {
+      list-style: none;
+      cursor: pointer;
+      padding: 16px 0;
+      font-weight: 700;
+    }
+    .group-box summary::-webkit-details-marker { display: none; }
+    .group-content { padding-bottom: 16px; }
+    .ontology-layout {
+      display: grid;
+      grid-template-columns: 1fr 320px;
+      gap: 16px;
+      height: 100%;
+    }
+    .mono {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 12px;
+      line-height: 1.6;
+    }
+    .modal-foot {
+      padding: 16px 24px 20px;
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+    }
+    .hidden { display: none !important; }
 
-  /* ── LAYOUT ── */
-  .flex { display: flex; }
-  .flex-col { flex-direction: column; }
-  .items-center { align-items: center; }
-  .items-start { align-items: flex-start; }
-  .justify-between { justify-content: space-between; }
-  .justify-end { justify-content: flex-end; }
-  .justify-center { justify-content: center; }
-  .gap-4 { gap: 4px; }
-  .gap-6 { gap: 6px; }
-  .gap-8 { gap: 8px; }
-  .gap-10 { gap: 10px; }
-  .gap-12 { gap: 12px; }
-  .gap-14 { gap: 14px; }
-  .gap-16 { gap: 16px; }
-  .gap-20 { gap: 20px; }
-  .gap-24 { gap: 24px; }
-  .flex-1 { flex: 1; }
-  .shrink-0 { flex-shrink: 0; }
-  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-  .grid-3 { display: grid; grid-template-columns: repeat(3,1fr); gap: 10px; }
-  .grid-4 { display: grid; grid-template-columns: repeat(4,1fr); gap: 10px; }
-  .grid-5 { display: grid; grid-template-columns: repeat(5,1fr); gap: 12px; }
-  .grid-chart { display: grid; grid-template-columns: 1fr 220px; gap: 14px; }
-  .grid-master { display: grid; grid-template-columns: 280px 1fr; gap: 14px; }
-  .w-full { width: 100%; }
-
-  /* ── CARD ── */
-  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; box-shadow: 0 1px 4px rgba(0,0,0,0.05); }
-  .card-p { padding: 20px; }
-  .card-hero { padding: 24px 28px; }
-
-  /* ── BUTTON ── */
-  .btn { display: inline-flex; align-items: center; gap: 6px; padding: 9px 16px; border-radius: 11px; font-size: 13px; font-weight: 600; cursor: pointer; border: none; font-family: var(--font-body); transition: opacity 0.15s, background 0.15s; }
-  .btn:hover { opacity: 0.88; }
-  .btn-primary { background: var(--accent); color: #fff; }
-  .btn-outline { background: var(--surface); color: var(--text-secondary); border: 1px solid var(--border); }
-  .btn-danger { background: var(--danger-light); color: var(--danger); border: 1px solid var(--danger-border); }
-  .btn-sm { padding: 6px 12px; font-size: 12px; border-radius: 9px; }
-
-  /* ── INPUT / TEXTAREA ── */
-  .inp { width: 100%; padding: 9px 12px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; font-size: 13px; color: var(--text-primary); font-family: var(--font-body); outline: none; transition: border-color 0.15s; }
-  .inp:focus { border-color: var(--accent-mid); }
-  .inp-search { padding-left: 34px; background: var(--surface-alt); }
-  textarea.inp { min-height: 90px; resize: vertical; }
-  .inp-mono { font-family: 'Courier New', monospace; font-size: 11px; background: #1e1b18; color: #d4e8c4; border-color: #3a3530; }
-  label.lbl { font-size: 11px; color: var(--text-secondary); font-weight: 500; display: block; margin-bottom: 5px; }
-
-  /* ── BADGE ── */
-  .badge { display: inline-block; padding: 3px 10px; border-radius: 20px; font-size: 11px; font-weight: 600; }
-  .badge-accent { background: var(--accent-light); color: var(--accent); border: 1px solid #c7d2fe; }
-  .badge-gray { background: var(--surface-alt); color: var(--text-secondary); border: 1px solid var(--border); }
-  .badge-success { background: var(--success-light); color: var(--success); border: 1px solid #bbf7d0; }
-
-  /* ── ACCORDION ── */
-  .acc-item { border: 1px solid var(--border); border-radius: 13px; background: var(--surface); overflow: hidden; margin-bottom: 8px; }
-  .acc-trigger { width: 100%; text-align: left; padding: 14px 18px; background: none; border: none; cursor: pointer; font-size: 13px; font-weight: 600; color: var(--text-primary); font-family: var(--font-display); display: flex; justify-content: space-between; align-items: center; }
-  .acc-trigger:hover { background: var(--surface-alt); }
-  .acc-content { padding: 0 18px 18px; }
-  .acc-icon { font-size: 16px; transition: transform 0.2s; color: var(--text-muted); }
-  .acc-icon.open { transform: rotate(180deg); }
-
-  /* ── TABS ── */
-  .tabs-list { display: flex; gap: 4px; background: var(--surface-alt); border: 1px solid var(--border); border-radius: 12px; padding: 4px; width: fit-content; margin-bottom: 16px; }
-  .tab-btn { padding: 7px 16px; border-radius: 9px; border: none; background: none; font-size: 12px; font-weight: 600; color: var(--text-secondary); cursor: pointer; font-family: var(--font-body); transition: all 0.15s; }
-  .tab-btn.active { background: var(--surface); color: var(--text-primary); box-shadow: 0 1px 4px rgba(0,0,0,0.08); }
-
-  /* ── SIDEBAR LIST ── */
-  .sidebar-item { width: 100%; text-align: left; border-radius: 11px; padding: 11px 13px; background: var(--bg); border: 1px solid var(--border); cursor: pointer; transition: all 0.15s; margin-bottom: 6px; }
-  .sidebar-item:hover { border-color: var(--accent-mid); }
-  .sidebar-item.active { background: var(--accent-light); border-color: #c7d2fe; }
-
-  /* ── TABLE ── */
-  .tbl { width: 100%; border-collapse: collapse; }
-  .tbl th { text-align: left; padding: 8px 10px; font-size: 10px; font-weight: 700; color: var(--text-muted); letter-spacing: 0.1em; text-transform: uppercase; border-bottom: 1px solid var(--border); }
-  .tbl td { padding: 10px; font-size: 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
-  .tbl td:first-child { color: var(--text-secondary); font-size: 11px; width: 280px; }
-  .tbl-empty { color: var(--text-muted); font-style: italic; }
-
-  /* ── MODAL ── */
-  .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.35); z-index: 100; display: flex; align-items: center; justify-content: center; padding: 16px; }
-  .modal { background: var(--bg); border: 1px solid var(--border); border-radius: 22px; width: 100%; max-width: 900px; max-height: 92vh; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 20px 60px rgba(0,0,0,0.15); }
-  .modal-header { padding: 22px 26px 16px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
-  .modal-body { flex: 1; overflow-y: auto; padding: 20px 26px; }
-  .modal-footer { padding: 14px 26px; border-top: 1px solid var(--border); flex-shrink: 0; }
-
-  /* ── SCROLLABLE SIDEBAR ── */
-  .sidebar-scroll { flex: 1; overflow-y: auto; padding: 0 10px 12px; }
-  .sidebar-scroll::-webkit-scrollbar { width: 4px; }
-  .sidebar-scroll::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 4px; }
-
-  /* ── KPI CARD ── */
-  .kpi-card { border-radius: 16px; padding: 20px; display: flex; flex-direction: column; gap: 12px; box-shadow: 0 1px 4px rgba(0,0,0,0.05); border: 1px solid var(--border); background: var(--surface); animation: fadeUp 0.35s ease both; }
-  .kpi-card.accent { background: var(--accent-light); border-color: #c7d2fe; }
-  .kpi-card.success { background: var(--success-light); border-color: #bbf7d0; }
-  .kpi-icon { width: 32px; height: 32px; border-radius: 9px; display: flex; align-items: center; justify-content: center; background: var(--surface-alt); flex-shrink: 0; }
-  .kpi-card.accent .kpi-icon { background: #c7d2fe; }
-  .kpi-card.success .kpi-icon { background: #bbf7d0; }
-
-  /* ── TOC FLOW ── */
-  .toc-box { border-radius: 12px; padding: 12px 14px; min-height: 100px; border: 1px solid var(--border); position: relative; }
-
-  /* ── INFO BOX ── */
-  .info-box { background: var(--surface-alt); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; min-height: 90px; }
-
-  /* ── SROI RING TEXT ── */
-  .sroi-label { font-size: 28px; font-weight: 800; color: var(--accent); font-family: var(--font-display); letter-spacing: -0.04em; }
-
-  /* ── DIVIDER ── */
-  .divider { height: 1px; background: var(--border); margin: 8px 0; }
-
-  /* ── ANIM ── */
-  @keyframes fadeUp { from { opacity:0; transform: translateY(12px); } to { opacity:1; transform: translateY(0); } }
-  .fade-up { animation: fadeUp 0.3s ease both; }
-
-  /* ── UTILITY ── */
-  .text-accent { color: var(--accent); }
-  .text-muted { color: var(--text-muted); }
-  .text-secondary { color: var(--text-secondary); }
-  .text-success { color: var(--success); }
-  .text-danger { color: var(--danger); }
-  .italic { font-style: italic; }
-  .pre { white-space: pre-wrap; }
-  .mono { font-family: 'Courier New', monospace; }
-  .truncate { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-  .clamp2 { overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
-  .relative { position: relative; }
-  .mt-4 { margin-top: 4px; }
-  .mt-6 { margin-top: 6px; }
-  .mt-8 { margin-top: 8px; }
-  .mt-12 { margin-top: 12px; }
-  .mt-16 { margin-top: 16px; }
-  .mb-6 { margin-bottom: 6px; }
-  .mb-8 { margin-bottom: 8px; }
-  .mb-12 { margin-bottom: 12px; }
-  .overflow-hidden { overflow: hidden; }
-  .w-280 { width: 280px; }
-  .h-full { height: 100%; }
-  .pb-24 { padding-bottom: 24px; border-bottom: 1px solid var(--border); }
-  .json-pre { font-family: 'Courier New', monospace; font-size: 11px; background: #1e1b18; color: #d4e8c4; border-radius: 12px; padding: 16px 20px; overflow-x: auto; max-height: 320px; line-height: 1.6; }
-</style>
+    @media (max-width: 1200px) {
+      .stats-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .flow-grid { grid-template-columns: repeat(2, 1fr); }
+      .main-grid { grid-template-columns: 1fr; }
+      .record-list { max-height: 320px; }
+      .ontology-layout { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 720px) {
+      .container { padding: 16px; }
+      .stats-grid, .info-grid, .flow-grid, .form-grid { grid-template-columns: 1fr; }
+      .stat-value { font-size: 28px; }
+      h1 { font-size: 26px; }
+      .modal-card { height: 95vh; }
+      .modal-head, .modal-tabs, .modal-body, .modal-foot { padding-left: 16px; padding-right: 16px; }
+    }
+  </style>
 </head>
 <body>
-<div id="root"></div>
-
-<script type="text/babel">
-const { useState, useEffect, useMemo, useRef } = React;
-const { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, RadialBarChart, RadialBar } = Recharts;
-
-// ─── SCHEMA ────────────────────────────────────────────────────────────────
-const COLUMN_SCHEMA = [
-  { key:"nama_cdo", label:"Kolom 1: Nama CDO (Nama Penyusun)", group:"Identitas" },
-  { key:"unit_kerja", label:"Kolom 2: Unit Kerja", group:"Identitas" },
-  { key:"lokasi_pelaksanaan", label:"Kolom 3: Lokasi Pelaksanaan", group:"Identitas" },
-  { key:"permasalahan", label:"Kolom 4: Permasalahan", group:"Framing" },
-  { key:"program", label:"Kolom 5: Program", group:"Framing" },
-  { key:"sub_program", label:"Kolom 6: Sub-Program", group:"Framing" },
-  { key:"kegiatan_tahun", label:"Kolom 7: Kegiatan (Tahun)", group:"Intervensi" },
-  { key:"kegiatan_bentuk", label:"Kolom 8: Kegiatan (Bentuk)", group:"Intervensi" },
-  { key:"kegiatan_uraian", label:"Kolom 9: Kegiatan (Uraian)", group:"Intervensi" },
-  { key:"stakeholder_jenis", label:"Kolom 10: Stakeholder (Jenis)", group:"Intervensi" },
-  { key:"stakeholder_peran", label:"Kolom 11: Stakeholder (Peran)", group:"Intervensi" },
-  { key:"investasi_tahun", label:"Kolom 12: Investasi (Tahun)", group:"Intervensi" },
-  { key:"investasi_bentuk", label:"Kolom 13: Investasi (Bentuk)", group:"Intervensi" },
-  { key:"investasi_nominal", label:"Kolom 14: Investasi (Nominal)", group:"Intervensi" },
-  { key:"penerima_manfaat", label:"Kolom 15: Penerima Manfaat", group:"Intervensi" },
-  { key:"output", label:"Kolom 16: Output", group:"Intervensi" },
-  { key:"kondisi_sebelum_ekonomi", label:"Kolom 17: Kondisi Sebelum (Ekonomi)", group:"Baseline" },
-  { key:"kondisi_sebelum_sosial", label:"Kolom 18: Kondisi Sebelum (Sosial)", group:"Baseline" },
-  { key:"kondisi_sebelum_lingkungan", label:"Kolom 19: Kondisi Sebelum (Lingkungan)", group:"Baseline" },
-  { key:"kondisi_sebelum_wellbeing", label:"Kolom 20: Kondisi Sebelum (Well-Being)", group:"Baseline" },
-  { key:"outcome_ekonomi", label:"Kolom 21: Outcome (Ekonomi)", group:"Outcome" },
-  { key:"outcome_sosial", label:"Kolom 22: Outcome (Sosial)", group:"Outcome" },
-  { key:"outcome_lingkungan", label:"Kolom 23: Outcome (Lingkungan)", group:"Outcome" },
-  { key:"outcome_wellbeing", label:"Kolom 24: Outcome (Well-Being)", group:"Outcome" },
-  { key:"indikator_ekonomi", label:"Kolom 25: Indikator Kuantitatif (Ekonomi)", group:"Indikator" },
-  { key:"indikator_sosial", label:"Kolom 26: Indikator Kuantitatif (Sosial)", group:"Indikator" },
-  { key:"indikator_lingkungan", label:"Kolom 27: Indikator Kuantitatif (Lingkungan)", group:"Indikator" },
-  { key:"indikator_wellbeing", label:"Kolom 28: Indikator Kuantitatif (Well-Being)", group:"Indikator" },
-  { key:"monetisasi_aspek", label:"Kolom 29: Monetisasi Sebelum Fiksasi (Aspek)", group:"Monetisasi" },
-  { key:"monetisasi_2022", label:"Kolom 30: Monetisasi Sebelum Fiksasi (2022)", group:"Monetisasi" },
-  { key:"monetisasi_2023", label:"Kolom 31: Monetisasi Sebelum Fiksasi (2023)", group:"Monetisasi" },
-  { key:"monetisasi_2024", label:"Kolom 32: Monetisasi Sebelum Fiksasi (2024)", group:"Monetisasi" },
-  { key:"deadweight", label:"Kolom 33: Fiksasi Dampak (Deadweight)", group:"Fiksasi" },
-  { key:"attribution", label:"Kolom 34: Fiksasi Dampak (Attribution)", group:"Fiksasi" },
-  { key:"drop_off", label:"Kolom 35: Fiksasi Dampak (Drop Off)", group:"Fiksasi" },
-  { key:"nilai_monetisasi_aspek", label:"Kolom 36: Nilai Monetisasi Final (Aspek)", group:"Nilai Final" },
-  { key:"nilai_monetisasi_2022", label:"Kolom 37: Nilai Monetisasi Final (2022)", group:"Nilai Final" },
-  { key:"nilai_monetisasi_2023", label:"Kolom 38: Nilai Monetisasi Final (2023)", group:"Nilai Final" },
-  { key:"nilai_monetisasi_2024", label:"Kolom 39: Nilai Monetisasi Final (2024)", group:"Nilai Final" },
-  { key:"informasi_umum", label:"Kolom 40: Informasi Umum", group:"Catatan" },
-];
-const GROUP_ORDER = ["Identitas","Framing","Intervensi","Baseline","Outcome","Indikator","Monetisasi","Fiksasi","Nilai Final","Catatan"];
-const groupedColumns = GROUP_ORDER.map(g => ({ group: g, columns: COLUMN_SCHEMA.filter(c => c.group === g) }));
-
-// ─── HELPERS ───────────────────────────────────────────────────────────────
-const toNum = v => {
-  if (typeof v === "number") return isFinite(v) ? v : 0;
-  if (typeof v !== "string") return 0;
-  const n = parseFloat(v.replace(/[^0-9,.-]/g,"").replace(/\.(?=.*\.)/g,"").replace(/,/g,""));
-  return isFinite(n) ? n : 0;
-};
-const fmt = v => new Intl.NumberFormat("id-ID").format(isFinite(v)?v:0);
-const fmtCur = v => `Rp ${fmt(v)}`;
-const fmtShort = v => v>=1e9?`Rp ${(v/1e9).toFixed(2)} M`:v>=1e6?`Rp ${(v/1e6).toFixed(1)} jt`:fmtCur(v);
-const getBen = r => { const n=Array.isArray(r?.ontology?.beneficiaries)?r.ontology.beneficiaries.reduce((s,i)=>s+toNum(i?.count??0),0):0; return n>0?n:toNum(r?.penerima_manfaat||0); };
-const getOutcome = r => { const c=[r?.nilai_monetisasi_2024,r?.nilai_monetisasi_2023,r?.nilai_monetisasi_2022,r?.monetisasi_2024,r?.monetisasi_2023,r?.monetisasi_2022].map(toNum); return c.find(v=>v>0)||0; };
-const getInvest = r => toNum(r?.investasi_nominal||0);
-const sroi = (o,i) => i?o/i:0;
-const uid = () => ([1e7]+-1e3+-4e3+-8e3+-1e11).replace(/[018]/g,c=>(c^crypto.getRandomValues(new Uint8Array(1))[0]&15>>c/4).toString(16));
-
-// ─── SEED ──────────────────────────────────────────────────────────────────
-const emptyOnt = () => ({ row_id:"", identity:{cdo_name:"",unit_kerja:"",lokasi:"",program:"",sub_program:""}, problems:[], activities:[], stakeholders:[], investments:[], beneficiaries:[], outputs:[], outcomes:[], indicators:[], valuations:[], adjustments:[], final_values:[], notes:[], column_bindings:{} });
-const emptyRec = () => { const o={id:uid(),title:"",created_at:new Date().toISOString(),updated_at:new Date().toISOString(),ontology:emptyOnt()}; COLUMN_SCHEMA.forEach(c=>{o[c.key]="";}); return o; };
-const seedData = () => {
-  const r=emptyRec();
-  r.title="Enduro Home Service";
-  r.program="TJSL CSV PT Pertamina Lubricants";
-  r.sub_program="Enduro Home Service";
-  r.investasi_nominal="25000000";
-  r.penerima_manfaat="25 siswa SMK";
-  r.permasalahan="Penguatan keterampilan praktis berbasis layanan, kesiapan kerja, model home service, dan literasi produk Enduro.";
-  r.output="Siswa memperoleh pelatihan teknik perbaikan kendaraan ringan, layanan home service, dan pengenalan pelumas Enduro.";
-  r.nilai_monetisasi_2024="72576000";
-  r.ontology={...emptyOnt(),row_id:"R_ENDURO_HOME_SERVICE_01",identity:{cdo_name:"",unit_kerja:"PT Pertamina Lubricants",lokasi:"",program:"TJSL CSV PT Pertamina Lubricants",sub_program:"Enduro Home Service"},problems:[{id:"P1",label:"penguatan keterampilan praktis berbasis layanan"},{id:"P2",label:"kesiapan kerja dan transisi sekolah-ke-kerja"},{id:"P3",label:"kompetensi layanan jemput bola"},{id:"P4",label:"literasi produk Enduro untuk shared value"}],beneficiaries:[{id:"B1",label:"siswa SMK",type:"direct",count:25}],valuations:[{id:"V1",label:"nilai outcome",value_2024:72576000}],notes:[{id:"N1",type:"csv_logic",text:"Shared value dibentuk melalui kompetensi siswa dan literasi produk Enduro."}],column_bindings:{"4":["P1","P2","P3","P4"],"15":["B1"]}};
-  return [r];
-};
-
-// ─── SVG ICONS (inline, no dependency) ────────────────────────────────────
-const Icon = ({d,size=14,color="currentColor"}) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d={d}/></svg>;
-const IconPlus = ({size,color}) => <Icon size={size} color={color} d="M12 5v14M5 12h14"/>;
-const IconSearch = ({size,color}) => <Icon size={size} color={color} d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z"/>;
-const IconEdit = ({size,color}) => <Icon size={size} color={color} d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>;
-const IconTrash = ({size,color}) => <Icon size={size} color={color} d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/>;
-const IconSave = ({size,color}) => <Icon size={size} color={color} d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2zM17 21v-8H7v8M7 3v5h8"/>;
-const IconJson = ({size,color}) => <Icon size={size} color={color} d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M9 15l-2 2 2 2M15 15l2 2-2 2"/>;
-const IconDb = ({size,color}) => <Icon size={size} color={color} d="M12 2C8 2 3 3.8 3 6v12c0 2.2 5 4 9 4s9-1.8 9-4V6c0-2.2-5-4-9-4zM3 6c0 2.2 5 4 9 4s9-1.8 9-4M3 12c0 2.2 5 4 9 4s9-1.8 9-4"/>;
-const IconChevron = ({size,color,dir="down"}) => { const rot=dir==="right"?"rotate(270deg)":dir==="up"?"rotate(180deg)":""; return <svg width={size||14} height={size||14} viewBox="0 0 24 24" fill="none" stroke={color||"currentColor"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{transform:rot,display:"inline"}}><polyline points="6 9 12 15 18 9"/></svg>; };
-const IconBar = ({size,color}) => <Icon size={size} color={color} d="M18 20V10M12 20V4M6 20v-6"/>;
-const IconTrend = ({size,color}) => <Icon size={size} color={color} d="M23 6l-9.5 9.5-5-5L1 18M17 6h6v6"/>;
-const IconLayers = ({size,color}) => <Icon size={size} color={color} d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>;
-const IconWallet = ({size,color}) => <Icon size={size} color={color} d="M21 12V7H5a2 2 0 0 1 0-4h14v4M21 12v5H5a2 2 0 0 0 0 4h14v-4M21 12H3"/>;
-const IconUsers = ({size,color}) => <Icon size={size} color={color} d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>;
-const IconTarget = ({size,color}) => <Icon size={size} color={color} d="M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM12 18a6 6 0 1 0 0-12 6 6 0 0 0 0 12zM12 14a2 2 0 1 0 0-4 2 2 0 0 0 0 4z"/>;
-const IconSigma = ({size,color}) => <Icon size={size} color={color} d="M18 7V4H6l7 8-7 8h12v-3"/>;
-const IconArrow = ({size,color}) => <Icon size={size} color={color} d="M7 17L17 7M7 7h10v10"/>;
-const IconClose = ({size,color}) => <Icon size={size} color={color} d="M18 6L6 18M6 6l12 12"/>;
-
-// ─── ACCORDION ─────────────────────────────────────────────────────────────
-function Accordion({ label, children, defaultOpen=false }) {
-  const [open, setOpen] = useState(defaultOpen);
-  return (
-    <div className="acc-item">
-      <button className="acc-trigger" onClick={()=>setOpen(p=>!p)}>
-        {label}
-        <span className={`acc-icon ${open?"open":""}`}>▾</span>
-      </button>
-      {open && <div className="acc-content">{children}</div>}
-    </div>
-  );
-}
-
-// ─── KPI CARD ──────────────────────────────────────────────────────────────
-function KpiCard({ title, value, sub, IconC, variant="default", delay=0 }) {
-  const cls = variant==="accent"?" accent":variant==="success"?" success":"";
-  const iconColor = variant==="accent"?"var(--accent)":variant==="success"?"var(--success)":"var(--text-secondary)";
-  const valColor = variant==="accent"?"var(--accent)":variant==="success"?"var(--success)":"var(--text-primary)";
-  return (
-    <div className={`kpi-card${cls}`} style={{animationDelay:`${delay*0.07}s`}}>
-      <div className="flex items-center justify-between">
-        <span className="label-caps">{title}</span>
-        <div className="kpi-icon"><IconC size={15} color={iconColor}/></div>
-      </div>
+  <div class="container">
+    <div class="topbar">
       <div>
-        <p className="display" style={{fontSize:21,fontWeight:700,color:valColor,letterSpacing:"-0.02em"}}>{value}</p>
-        {sub && <p style={{fontSize:11,color:"var(--text-muted)",marginTop:4}}>{sub}</p>}
+        <h1>TJSL CSV Analyzer – CRUD 40 Kolom</h1>
+        <p class="subtitle">Input, kelola, dan tampilkan record program TJSL lengkap dengan struktur data ontologi.</p>
+      </div>
+      <div class="actions">
+        <button class="btn primary" id="addBtn">Tambah</button>
+        <button class="btn" id="exportBtn">Export JSON</button>
+        <label class="btn" for="importInput">Import JSON</label>
+        <input id="importInput" type="file" accept="application/json" class="hidden" />
       </div>
     </div>
-  );
-}
 
-// ─── SROI RING ─────────────────────────────────────────────────────────────
-function SROIRing({ value }) {
-  const pct = Math.round(Math.min(value,10)/10*100);
-  const data = [{name:"SROI",value:pct,fill:"var(--accent)"},{name:"",value:100-pct,fill:"var(--surface-alt)"}];
-  return (
-    <div className="flex flex-col items-center justify-center" style={{padding:"20px 0",gap:8}}>
-      <div style={{position:"relative",width:140,height:72,overflow:"hidden"}}>
-        <ResponsiveContainer width="100%" height={144}>
-          <RadialBarChart cx="50%" cy="100%" innerRadius="68%" outerRadius="100%" startAngle={180} endAngle={0} data={data} barSize={13}>
-            <RadialBar dataKey="value" cornerRadius={6}/>
-          </RadialBarChart>
-        </ResponsiveContainer>
-        <div style={{position:"absolute",bottom:0,left:0,right:0,textAlign:"center"}}>
-          <span className="sroi-label">{value.toFixed(2)}x</span>
-        </div>
-      </div>
-      <span className="label-caps">Rasio SROI Agregat</span>
-      <div className={`badge ${value>=1?"badge-success":"badge-gray"}`}>
-        {value>=1?`+${((value-1)*100).toFixed(0)}% di atas investasi`:"Di bawah threshold"}
-      </div>
-    </div>
-  );
-}
+    <div class="stats-grid" id="statsGrid"></div>
 
-// ─── CHART ─────────────────────────────────────────────────────────────────
-const CustomTooltip = ({ active, payload, label }) => {
-  if (!active||!payload?.length) return null;
-  return (
-    <div style={{background:"var(--surface)",border:"1px solid var(--border)",borderRadius:12,padding:"10px 14px",fontSize:12,boxShadow:"0 4px 16px rgba(0,0,0,0.1)"}}>
-      <p style={{fontWeight:700,marginBottom:6,color:"var(--text-secondary)"}}>{label}</p>
-      {payload.map(p=><p key={p.name} style={{color:p.fill}}>{p.name}: <strong>{fmtShort(p.value)}</strong></p>)}
-    </div>
-  );
-};
-function OutcomeChart({ records }) {
-  const data = records.slice(0,8).map(r=>({ name:(r.sub_program||r.title||"—").slice(0,13), Investasi:getInvest(r), Outcome:getOutcome(r) })).filter(d=>d.Investasi>0||d.Outcome>0);
-  if (!data.length) return <div style={{height:160,display:"flex",alignItems:"center",justifyContent:"center",color:"var(--text-muted)",fontSize:13}}>Belum ada data numerik.</div>;
-  return (
-    <ResponsiveContainer width="100%" height={175}>
-      <BarChart data={data} margin={{top:4,right:8,left:-8,bottom:0}} barGap={3}>
-        <XAxis dataKey="name" tick={{fill:"var(--text-muted)",fontSize:10,fontFamily:"var(--font-display)"}} axisLine={false} tickLine={false}/>
-        <YAxis tickFormatter={v=>`${(v/1e6).toFixed(0)}jt`} tick={{fill:"var(--text-muted)",fontSize:10}} axisLine={false} tickLine={false}/>
-        <Tooltip content={<CustomTooltip/>} cursor={{fill:"var(--surface-alt)"}}/>
-        <Bar dataKey="Investasi" fill="#a5b4fc" radius={[4,4,0,0]}/>
-        <Bar dataKey="Outcome" fill="var(--accent)" radius={[4,4,0,0]}/>
-      </BarChart>
-    </ResponsiveContainer>
-  );
-}
-
-// ─── TOC FLOW ──────────────────────────────────────────────────────────────
-function ToCFlow({ record }) {
-  const steps = [
-    {label:"Baseline",bg:"#dbeafe",tc:"#1e40af",items:[record.kondisi_sebelum_ekonomi,record.kondisi_sebelum_sosial,record.kondisi_sebelum_lingkungan,record.kondisi_sebelum_wellbeing].filter(Boolean)},
-    {label:"Output",bg:"#fef9c3",tc:"#713f12",items:[record.output].filter(Boolean)},
-    {label:"Outcome",bg:"#dcfce7",tc:"#14532d",items:[record.outcome_ekonomi,record.outcome_sosial,record.outcome_lingkungan,record.outcome_wellbeing].filter(Boolean)},
-    {label:"Indikator",bg:"var(--accent-light)",tc:"var(--accent)",items:[record.indikator_ekonomi,record.indikator_sosial,record.indikator_lingkungan,record.indikator_wellbeing].filter(Boolean)},
-  ];
-  return (
-    <div className="grid-4">
-      {steps.map((s,i)=>(
-        <div key={s.label} style={{position:"relative"}}>
-          <div className="toc-box" style={{background:s.bg}}>
-            <p style={{fontSize:9,fontWeight:800,letterSpacing:"0.14em",color:s.tc,textTransform:"uppercase",marginBottom:8,fontFamily:"var(--font-display)"}}>{s.label}</p>
-            {s.items.length?s.items.map((it,j)=><p key={j} style={{fontSize:11,color:"var(--text-primary)",lineHeight:1.5,marginBottom:4}}>— {it}</p>):<p className="text-muted italic" style={{fontSize:11}}>Belum diisi</p>}
-          </div>
-          {i<steps.length-1&&<div style={{position:"absolute",right:-10,top:"50%",transform:"translateY(-50%)",zIndex:10}}><IconChevron dir="right" size={16} color="var(--text-muted)"/></div>}
-        </div>
-      ))}
-    </div>
-  );
-}
-
-// ─── INFO BOX ──────────────────────────────────────────────────────────────
-function InfoBox({title,content}) {
-  return (
-    <div className="info-box">
-      <p className="label-caps mb-8">{title}</p>
-      <p className="pre" style={{fontSize:12,color:"var(--text-primary)",lineHeight:1.65}}>{content||<span className="text-muted italic">Belum diisi</span>}</p>
-    </div>
-  );
-}
-
-// ─── PITCH VIEW ────────────────────────────────────────────────────────────
-function PitchView({ record, dashboardStats }) {
-  const ov=getOutcome(record), iv=getInvest(record), rs=sroi(ov,iv);
-  return (
-    <div className="flex flex-col" style={{gap:14}}>
-      {/* Hero */}
-      <div className="card card-hero fade-up">
-        <div className="flex items-start justify-between gap-16">
-          <div className="flex-1">
-            <p className="label-caps mb-8">Sub Program</p>
-            <h2 className="display" style={{fontSize:19,fontWeight:700,letterSpacing:"-0.02em",lineHeight:1.3}}>{record.title||record.sub_program||"Tanpa Judul"}</h2>
-            <p className="text-secondary mt-6" style={{fontSize:12}}>{record.program||"—"}</p>
-            <div className="flex gap-6 mt-12" style={{flexWrap:"wrap"}}>
-              {record.sub_program&&<span className="badge badge-accent">{record.sub_program}</span>}
-              {record.lokasi_pelaksanaan&&<span className="badge badge-gray">{record.lokasi_pelaksanaan}</span>}
-            </div>
-          </div>
-          {iv>0&&(
-            <div style={{textAlign:"right",flexShrink:0}}>
-              <p className="label-caps mb-6">SROI Record</p>
-              <p className="display text-accent" style={{fontSize:30,fontWeight:800,letterSpacing:"-0.04em",lineHeight:1}}>{rs.toFixed(2)}x</p>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Quick metrics */}
-      <div className="grid-3">
-        {[{l:"Investasi",v:iv>0?fmtShort(iv):"—",c:"var(--text-primary)"},{l:"Nilai Outcome Final",v:ov>0?fmtShort(ov):"—",c:"var(--accent)"},{l:"Penerima Manfaat",v:record.penerima_manfaat||"—",c:"var(--text-primary)"}].map(m=>(
-          <div key={m.l} className="card" style={{padding:"14px 16px"}}>
-            <p className="label-caps mb-6">{m.l}</p>
-            <p className="display" style={{fontSize:15,fontWeight:700,color:m.c,letterSpacing:"-0.02em"}}>{m.v}</p>
-          </div>
-        ))}
-      </div>
-
-      <Accordion label="Framing Program" defaultOpen={true}>
-        <div className="grid-2"><InfoBox title="Permasalahan" content={record.permasalahan}/><InfoBox title="Penerima Manfaat" content={record.penerima_manfaat}/></div>
-      </Accordion>
-
-      <Accordion label="Intervensi">
-        <div className="grid-2">
-          <InfoBox title="Kegiatan" content={[record.kegiatan_tahun,record.kegiatan_bentuk,record.kegiatan_uraian].filter(Boolean).join(" · ")}/>
-          <InfoBox title="Stakeholder" content={[record.stakeholder_jenis,record.stakeholder_peran].filter(Boolean).join(" · ")}/>
-          <InfoBox title="Investasi" content={[record.investasi_tahun,record.investasi_bentuk,iv>0?fmtCur(iv):""].filter(Boolean).join(" · ")}/>
-          <InfoBox title="Output" content={record.output}/>
-        </div>
-      </Accordion>
-
-      <Accordion label="Theory of Change" defaultOpen={true}>
-        <ToCFlow record={record}/>
-      </Accordion>
-
-      <Accordion label="SROI Agregat — Semua Record">
-        <div className="grid-5">
-          <KpiCard title="Sub Program" value={fmt(dashboardStats.totalSubPrograms)} IconC={IconLayers} sub="Total record" delay={0}/>
-          <KpiCard title="Total Investasi" value={fmtShort(dashboardStats.totalInvestment)} IconC={IconWallet} sub="Akumulasi nominal" delay={1}/>
-          <KpiCard title="Penerima Manfaat" value={fmt(dashboardStats.totalBeneficiaries)} IconC={IconUsers} sub="Ontologi + kolom" delay={2}/>
-          <KpiCard title="Total Outcome" value={fmtShort(dashboardStats.totalOutcomeValue)} IconC={IconTarget} sub="Nilai monetisasi final" delay={3} variant="success"/>
-          <KpiCard title="SROI" value={dashboardStats.sroi?`${dashboardStats.sroi.toFixed(2)}x`:"—"} IconC={IconSigma} sub="Outcome ÷ Investasi" delay={4} variant="accent"/>
-        </div>
-      </Accordion>
-
-      <Accordion label="Struktur Ontologi JSON">
-        <pre className="json-pre">{JSON.stringify(record.ontology,null,2)}</pre>
-      </Accordion>
-    </div>
-  );
-}
-
-// ─── FORM ──────────────────────────────────────────────────────────────────
-function RecordForm({ open, onClose, onSave, initial }) {
-  const [form, setForm] = useState(initial||emptyRec());
-  const [ontText, setOntText] = useState(JSON.stringify((initial||emptyRec()).ontology,null,2));
-  const [tab, setTab] = useState("columns");
-
-  useEffect(()=>{ const b=initial||emptyRec(); setForm(b); setOntText(JSON.stringify(b.ontology,null,2)); },[initial,open]);
-
-  const upd = (k,v) => setForm(p=>({...p,[k]:v}));
-  const handleSave = () => {
-    let ont; try{ont=JSON.parse(ontText);}catch{alert("JSON ontologi tidak valid.");return;}
-    onSave({...form,ontology:ont,updated_at:new Date().toISOString(),title:form.title||form.sub_program||form.program||"Tanpa Judul"});
-    onClose();
-  };
-  if (!open) return null;
-
-  return (
-    <div className="modal-overlay" onClick={e=>{if(e.target===e.currentTarget)onClose();}}>
-      <div className="modal" style={{maxWidth:920}}>
-        <div className="modal-header flex items-center justify-between">
-          <h2 className="display" style={{fontSize:16,fontWeight:700}}>{initial?"Edit Record":"Tambah Record Baru"}</h2>
-          <button className="btn btn-outline btn-sm" onClick={onClose}><IconClose size={13}/>Tutup</button>
-        </div>
-        <div style={{padding:"14px 26px 0",flexShrink:0}}>
-          <div className="tabs-list">
-            <button className={`tab-btn ${tab==="columns"?"active":""}`} onClick={()=>setTab("columns")}>40 Kolom</button>
-            <button className={`tab-btn ${tab==="ontology"?"active":""}`} onClick={()=>setTab("ontology")}>Ontologi JSON</button>
+    <div class="main-grid">
+      <div class="card">
+        <div class="panel-head">
+          <h2 class="panel-title">Daftar Record</h2>
+          <div class="search-wrap">
+            <span class="search-icon">⌕</span>
+            <input id="searchInput" placeholder="Cari program / sub-program..." />
           </div>
         </div>
+        <div class="panel-body">
+          <div class="record-list" id="recordList"></div>
+        </div>
+      </div>
 
-        <div className="modal-body">
-          {tab==="columns"&&(
-            <div className="flex flex-col" style={{gap:16}}>
-              <div className="grid-2">
-                <div><label className="lbl">Judul / Nama Record</label><input className="inp" value={form.title} onChange={e=>upd("title",e.target.value)} placeholder="Enduro Home Service - Batch 2024"/></div>
-                <div><label className="lbl">Row ID Ontologi</label><input className="inp" value={form.ontology?.row_id||""} onChange={e=>{const v=e.target.value;setForm(p=>({...p,ontology:{...p.ontology,row_id:v}}));setOntText(t=>{try{const o=JSON.parse(t);o.row_id=v;return JSON.stringify(o,null,2);}catch{return t;}});}} placeholder="R_PROGRAM_01"/></div>
+      <div id="detailRoot"></div>
+    </div>
+  </div>
+
+  <div class="modal" id="recordModal">
+    <div class="modal-card">
+      <div class="modal-head">
+        <h2 id="modalTitle">Tambah Record</h2>
+        <button class="btn" id="closeModalBtn">Tutup</button>
+      </div>
+      <div class="modal-tabs">
+        <button class="tab-btn active" data-tab="columns">40 Kolom</button>
+        <button class="tab-btn" data-tab="ontology">Ontologi JSON</button>
+      </div>
+      <div class="modal-body">
+        <div class="tab-panel active" id="tab-columns">
+          <div class="scroll-pane">
+            <div class="form-grid">
+              <div class="field">
+                <label for="field-title">Judul / Nama Record</label>
+                <input id="field-title" />
               </div>
-              {groupedColumns.map(({group,columns})=>(
-                <Accordion key={group} label={group} defaultOpen={["Identitas","Framing"].includes(group)}>
-                  <div className="grid-2">
-                    {columns.map(col=>(
-                      <div key={col.key}><label className="lbl">{col.label}</label><textarea className="inp" value={form[col.key]||""} onChange={e=>upd(col.key,e.target.value)}/></div>
-                    ))}
-                  </div>
-                </Accordion>
-              ))}
-            </div>
-          )}
-          {tab==="ontology"&&(
-            <div style={{display:"grid",gridTemplateColumns:"1fr 240px",gap:14,height:"60vh"}}>
-              <textarea className="inp inp-mono" style={{height:"100%",resize:"none"}} value={ontText} onChange={e=>setOntText(e.target.value)}/>
-              <div className="card card-p" style={{height:"fit-content"}}>
-                <p className="display" style={{fontSize:13,fontWeight:700,marginBottom:10}}>Panduan Struktur</p>
-                <p style={{fontSize:11,color:"var(--text-secondary)",lineHeight:1.7}}>Objek ontologi disimpan bersama record 40 kolom.<br/><br/>Node utama: <code style={{color:"var(--accent)",background:"var(--accent-light)",padding:"1px 4px",borderRadius:4}}>identity, problems, beneficiaries, valuations, notes, column_bindings</code><br/><br/>Setiap node sebaiknya memiliki <code style={{color:"var(--accent)"}}>id</code> unik.</p>
+              <div class="field">
+                <label for="field-rowid">Row ID Ontologi</label>
+                <input id="field-rowid" placeholder="R_ENDURO_HOME_SERVICE_01" />
               </div>
             </div>
-          )}
-        </div>
-
-        <div className="modal-footer flex justify-end gap-8">
-          <button className="btn btn-outline" onClick={onClose}>Batal</button>
-          <button className="btn btn-primary" onClick={handleSave}><IconSave size={13}/>Simpan</button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ─── APP ───────────────────────────────────────────────────────────────────
-function App() {
-  const [records, setRecords] = useState([]);
-  const [query, setQuery] = useState("");
-  const [selectedId, setSelectedId] = useState(null);
-  const [openForm, setOpenForm] = useState(false);
-  const [editing, setEditing] = useState(null);
-  const [detailTab, setDetailTab] = useState("detail");
-  const fileRef = useRef();
-
-  useEffect(()=>{
-    const raw=localStorage.getItem("tjsl_csv_v3");
-    if(raw){try{setRecords(JSON.parse(raw));}catch{setRecords(seedData());}}
-    else setRecords(seedData());
-  },[]);
-  useEffect(()=>{ if(records.length) localStorage.setItem("tjsl_csv_v3",JSON.stringify(records)); },[records]);
-
-  const filtered = useMemo(()=>{
-    const q=query.toLowerCase();
-    return records.filter(r=>[r.title,r.program,r.sub_program,r.permasalahan,r.penerima_manfaat].join(" ").toLowerCase().includes(q));
-  },[records,query]);
-
-  const selected = useMemo(()=>filtered.find(r=>r.id===selectedId)||filtered[0]||null,[filtered,selectedId]);
-
-  const stats = useMemo(()=>{
-    const ti=records.reduce((s,r)=>s+getInvest(r),0);
-    const to=records.reduce((s,r)=>s+getOutcome(r),0);
-    return { totalSubPrograms:records.length, totalInvestment:ti, totalBeneficiaries:records.reduce((s,r)=>s+getBen(r),0), totalOutcomeValue:to, sroi:sroi(to,ti) };
-  },[records]);
-
-  useEffect(()=>{
-    if(!selectedId&&filtered[0]) setSelectedId(filtered[0].id);
-    if(selectedId&&!filtered.some(r=>r.id===selectedId)&&filtered[0]) setSelectedId(filtered[0].id);
-  },[filtered,selectedId]);
-
-  const saveRec = p=>{
-    setRecords(prev=>prev.some(r=>r.id===p.id)?prev.map(r=>r.id===p.id?p:r):[p,...prev]);
-    setSelectedId(p.id);
-  };
-  const delRec = id=>{
-    if(!confirm("Hapus record ini?")) return;
-    setRecords(prev=>prev.filter(r=>r.id!==id));
-    if(selectedId===id) setSelectedId(null);
-  };
-  const exportJSON = ()=>{
-    const blob=new Blob([JSON.stringify(records,null,2)],{type:"application/json"});
-    const url=URL.createObjectURL(blob);
-    const a=document.createElement("a");a.href=url;a.download="tjsl-csv-records.json";a.click();URL.revokeObjectURL(url);
-  };
-  const importJSON = e=>{
-    const f=e.target.files?.[0];if(!f)return;
-    const r=new FileReader();
-    r.onload=ev=>{try{const p=JSON.parse(ev.target.result);if(!Array.isArray(p))throw 0;setRecords(p);setSelectedId(p[0]?.id||null);}catch{alert("File JSON tidak valid.");}};
-    r.readAsText(f);e.target.value="";
-  };
-
-  return (
-    <div className="flex flex-col" style={{gap:28}}>
-
-      {/* ── HEADER ── */}
-      <div className="flex items-end justify-between gap-16 pb-24">
-        <div>
-          <div className="flex items-center gap-8 mb-6">
-            <IconBar size={15} color="var(--accent)"/>
-            <span className="label-caps" style={{color:"var(--accent)"}}>Dashboard Kajian</span>
-          </div>
-          <h1 className="display" style={{fontSize:25,fontWeight:800,letterSpacing:"-0.03em",lineHeight:1.2}}>SROI Analyzer — TJSL CSV</h1>
-          <p className="text-secondary mt-6" style={{fontSize:13}}>Kelola 40 kolom data program, ontologi, dan kalkulasi SROI terintegrasi.</p>
-        </div>
-        <div className="flex gap-8 shrink-0">
-          <button className="btn btn-primary" onClick={()=>{setEditing(null);setOpenForm(true);}}><IconPlus size={13}/>Tambah</button>
-          <button className="btn btn-outline" onClick={exportJSON}><IconJson size={13}/>Export</button>
-          <button className="btn btn-outline" onClick={()=>fileRef.current.click()}><IconDb size={13}/>Import</button>
-          <input ref={fileRef} type="file" accept="application/json" style={{display:"none"}} onChange={importJSON}/>
-        </div>
-      </div>
-
-      {/* ── KPI ROW ── */}
-      <div className="grid-5">
-        <KpiCard title="Sub Program" value={fmt(stats.totalSubPrograms)} IconC={IconLayers} sub="Total record" delay={0}/>
-        <KpiCard title="Total Investasi" value={fmtShort(stats.totalInvestment)} IconC={IconWallet} sub="Akumulasi nominal" delay={1}/>
-        <KpiCard title="Penerima Manfaat" value={fmt(stats.totalBeneficiaries)} IconC={IconUsers} sub="Ontologi + kolom" delay={2}/>
-        <KpiCard title="Total Outcome" value={fmtShort(stats.totalOutcomeValue)} IconC={IconTarget} sub="Nilai monetisasi final" delay={3} variant="success"/>
-        <KpiCard title="SROI Agregat" value={stats.sroi?`${stats.sroi.toFixed(2)}x`:"—"} IconC={IconSigma} sub="Outcome ÷ Investasi" delay={4} variant="accent"/>
-      </div>
-
-      {/* ── CHART ROW ── */}
-      <div className="grid-chart">
-        <div className="card card-p">
-          <div className="flex items-center gap-8 mb-12">
-            <IconTrend size={14} color="var(--accent)"/>
-            <span className="label-caps">Investasi vs Outcome per Sub-Program</span>
-          </div>
-          <OutcomeChart records={records}/>
-          <div className="flex gap-16 mt-8">
-            <div className="flex items-center gap-6"><div style={{width:10,height:10,borderRadius:3,background:"#a5b4fc"}}/><span style={{fontSize:10,color:"var(--text-muted)"}}>Investasi</span></div>
-            <div className="flex items-center gap-6"><div style={{width:10,height:10,borderRadius:3,background:"var(--accent)"}}/><span style={{fontSize:10,color:"var(--text-muted)"}}>Outcome</span></div>
+            <div id="columnGroups"></div>
           </div>
         </div>
-        <div className="card flex items-center justify-center">
-          <SROIRing value={stats.sroi||0}/>
-        </div>
-      </div>
-
-      {/* ── MASTER DETAIL ── */}
-      <div className="grid-master">
-
-        {/* Sidebar */}
-        <div className="card flex flex-col" style={{height:"72vh"}}>
-          <div style={{padding:"18px 16px 12px",flexShrink:0}}>
-            <p className="label-caps mb-8">Daftar Record</p>
-            <div className="relative">
-              <div style={{position:"absolute",left:10,top:"50%",transform:"translateY(-50%)"}}>
-                <IconSearch size={13} color="var(--text-muted)"/>
+        <div class="tab-panel" id="tab-ontology">
+          <div class="ontology-layout">
+            <textarea id="ontologyText" class="mono"></textarea>
+            <div class="card" style="border-radius: 22px; box-shadow: none;">
+              <div class="panel-head"><h3 class="panel-title" style="font-size:16px;">Panduan Ringkas</h3></div>
+              <div class="panel-body muted" style="font-size:14px; line-height:1.7;">
+                <p>Objek ontologi disimpan bersama record 40 kolom.</p>
+                <p>Gunakan struktur: identity, problems, activities, stakeholders, beneficiaries, outputs, outcomes, indicators, valuations, adjustments, final_values, notes, column_bindings.</p>
+                <p>Untuk problems, Anda bisa menambahkan field seperti: id, label, title, dimension, problem_type, description, narrative, dan source_refs.</p>
+                <p>Setiap node sebaiknya memiliki id agar mudah direferensikan.</p>
               </div>
-              <input className="inp inp-search" value={query} onChange={e=>setQuery(e.target.value)} placeholder="Cari program..."/>
             </div>
           </div>
-          <div className="sidebar-scroll">
-            {filtered.map(r=>{
-              const rv=getOutcome(r),ri=getInvest(r),rs2=sroi(rv,ri);
-              const isActive=selected?.id===r.id;
-              return (
-                <button key={r.id} className={`sidebar-item ${isActive?"active":""}`} onClick={()=>setSelectedId(r.id)} style={{width:"100%"}}>
-                  <div className="flex items-start justify-between gap-6">
-                    <p className="clamp2" style={{fontSize:12,fontWeight:700,color:isActive?"var(--accent)":"var(--text-primary)",lineHeight:1.4}}>{r.title||r.sub_program||"Tanpa Judul"}</p>
-                    {rs2>0&&<span className="display shrink-0" style={{fontSize:11,fontWeight:800,color:"var(--accent)"}}>{rs2.toFixed(1)}x</span>}
-                  </div>
-                  <p className="truncate mt-4" style={{fontSize:10,color:"var(--text-muted)"}}>{r.program||"—"}</p>
-                </button>
-              );
-            })}
-            {!filtered.length&&<p style={{fontSize:12,color:"var(--text-muted)",textAlign:"center",padding:"32px 0"}}>Tidak ada data.</p>}
+        </div>
+      </div>
+      <div class="modal-foot">
+        <button class="btn" id="cancelBtn">Batal</button>
+        <button class="btn primary" id="saveBtn">Simpan</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const COLUMN_SCHEMA = [
+      { key: "nama_cdo", label: "Kolom 1: Nama CDO (Nama Penyusun)", group: "Identitas" },
+      { key: "unit_kerja", label: "Kolom 2: Unit Kerja", group: "Identitas" },
+      { key: "lokasi_pelaksanaan", label: "Kolom 3: Lokasi Pelaksanaan", group: "Identitas" },
+      { key: "permasalahan", label: "Kolom 4: Permasalahan", group: "Framing" },
+      { key: "program", label: "Kolom 5: Program", group: "Framing" },
+      { key: "sub_program", label: "Kolom 6: Sub-Program", group: "Framing" },
+      { key: "kegiatan_tahun", label: "Kolom 7: Kegiatan (Tahun)", group: "Intervensi" },
+      { key: "kegiatan_bentuk", label: "Kolom 8: Kegiatan (Bentuk)", group: "Intervensi" },
+      { key: "kegiatan_uraian", label: "Kolom 9: Kegiatan (Uraian)", group: "Intervensi" },
+      { key: "stakeholder_jenis", label: "Kolom 10: Stakeholder (Jenis)", group: "Intervensi" },
+      { key: "stakeholder_peran", label: "Kolom 11: Stakeholder (Peran)", group: "Intervensi" },
+      { key: "investasi_tahun", label: "Kolom 12: Investasi (Tahun)", group: "Intervensi" },
+      { key: "investasi_bentuk", label: "Kolom 13: Investasi (Bentuk)", group: "Intervensi" },
+      { key: "investasi_nominal", label: "Kolom 14: Investasi (Nominal)", group: "Intervensi" },
+      { key: "penerima_manfaat", label: "Kolom 15: Penerima Manfaat", group: "Intervensi" },
+      { key: "output", label: "Kolom 16: Output", group: "Intervensi" },
+      { key: "kondisi_sebelum_ekonomi", label: "Kolom 17: Kondisi Sebelum Program (Ekonomi)", group: "Baseline" },
+      { key: "kondisi_sebelum_sosial", label: "Kolom 18: Kondisi Sebelum Program (Sosial)", group: "Baseline" },
+      { key: "kondisi_sebelum_lingkungan", label: "Kolom 19: Kondisi Sebelum Program (Lingkungan)", group: "Baseline" },
+      { key: "kondisi_sebelum_wellbeing", label: "Kolom 20: Kondisi Sebelum Program (Well-Being)", group: "Baseline" },
+      { key: "outcome_ekonomi", label: "Kolom 21: Outcome (Ekonomi)", group: "Outcome" },
+      { key: "outcome_sosial", label: "Kolom 22: Outcome (Sosial)", group: "Outcome" },
+      { key: "outcome_lingkungan", label: "Kolom 23: Outcome (Lingkungan)", group: "Outcome" },
+      { key: "outcome_wellbeing", label: "Kolom 24: Outcome (Well-Being)", group: "Outcome" },
+      { key: "indikator_ekonomi", label: "Kolom 25: Penetapan Indikator Kuantitatif (Ekonomi)", group: "Indikator" },
+      { key: "indikator_sosial", label: "Kolom 26: Penetapan Indikator Kuantitatif (Sosial)", group: "Indikator" },
+      { key: "indikator_lingkungan", label: "Kolom 27: Penetapan Indikator Kuantitatif (Lingkungan)", group: "Indikator" },
+      { key: "indikator_wellbeing", label: "Kolom 28: Penetapan Indikator Kuantitatif (Well-Being)", group: "Indikator" },
+      { key: "monetisasi_aspek", label: "Kolom 29: Monetisasi Sebelum Fiksasi (Aspek)", group: "Monetisasi" },
+      { key: "monetisasi_2022", label: "Kolom 30: Monetisasi Sebelum Fiksasi (2022)", group: "Monetisasi" },
+      { key: "monetisasi_2023", label: "Kolom 31: Monetisasi Sebelum Fiksasi (2023)", group: "Monetisasi" },
+      { key: "monetisasi_2024", label: "Kolom 32: Monetisasi Sebelum Fiksasi (2024)", group: "Monetisasi" },
+      { key: "deadweight", label: "Kolom 33: Fiksasi Dampak (Deadweight)", group: "Fiksasi" },
+      { key: "attribution", label: "Kolom 34: Fiksasi Dampak (Attribution)", group: "Fiksasi" },
+      { key: "drop_off", label: "Kolom 35: Fiksasi Dampak (Drop Off)", group: "Fiksasi" },
+      { key: "nilai_monetisasi_aspek", label: "Kolom 36: Nilai Monetisasi Setelah Fiksasi (Aspek)", group: "Nilai Final" },
+      { key: "nilai_monetisasi_2022", label: "Kolom 37: Nilai Monetisasi Setelah Fiksasi (2022)", group: "Nilai Final" },
+      { key: "nilai_monetisasi_2023", label: "Kolom 38: Nilai Monetisasi Setelah Fiksasi (2023)", group: "Nilai Final" },
+      { key: "nilai_monetisasi_2024", label: "Kolom 39: Nilai Monetisasi Setelah Fiksasi (2024)", group: "Nilai Final" },
+      { key: "informasi_umum", label: "Kolom 40: Informasi Umum", group: "Catatan" }
+    ];
+
+    const GROUP_ORDER = ["Identitas", "Framing", "Intervensi", "Baseline", "Outcome", "Indikator", "Monetisasi", "Fiksasi", "Nilai Final", "Catatan"];
+
+    const groupedColumns = GROUP_ORDER.map(group => ({
+      group,
+      columns: COLUMN_SCHEMA.filter(c => c.group === group)
+    }));
+
+    const STORAGE_KEY = "tjsl_csv_records_v1";
+    let records = [];
+    let selectedId = null;
+    let editingId = null;
+    let query = "";
+
+    const iconMap = {
+      subprogram: "🧩",
+      investasi: "💰",
+      manfaat: "👥",
+      outcome: "🎯",
+      sroi: "∑"
+    };
+
+    function safeId() {
+      return (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : `id_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    }
+
+    function emptyOntology() {
+      return {
+        row_id: "",
+        identity: { cdo_name: "", unit_kerja: "", lokasi: "", program: "", sub_program: "" },
+        problems: [],
+        activities: [],
+        stakeholders: [],
+        investments: [],
+        beneficiaries: [],
+        outputs: [],
+        baselines: [],
+        outcomes: [],
+        indicators: [],
+        valuations: [],
+        adjustments: [],
+        final_values: [],
+        notes: [],
+        column_bindings: {}
+      };
+    }
+
+    function emptyRecord() {
+      const obj = {
+        id: safeId(),
+        title: "",
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        ontology: emptyOntology()
+      };
+      COLUMN_SCHEMA.forEach(c => obj[c.key] = "");
+      return obj;
+    }
+
+    function seed() {
+      const r = emptyRecord();
+      r.title = "Contoh – Enduro Home Service";
+      r.program = "TJSL CSV PT Pertamina Lubricants";
+      r.sub_program = "Enduro Home Service";
+      r.investasi_nominal = "25000000";
+      r.penerima_manfaat = "25 siswa SMK";
+      r.permasalahan = "Penguatan keterampilan praktis berbasis layanan, kesiapan kerja, model home service, dan literasi produk Enduro.";
+      r.output = "Siswa memperoleh pelatihan teknik perbaikan kendaraan ringan, layanan home service, dan pengenalan pelumas Enduro.";
+      r.nilai_monetisasi_2024 = "72576000";
+      r.ontology = {
+        ...emptyOntology(),
+        row_id: "R_ENDURO_HOME_SERVICE_01",
+        identity: {
+          cdo_name: "",
+          unit_kerja: "PT Pertamina Lubricants",
+          lokasi: "",
+          program: "TJSL CSV PT Pertamina Lubricants",
+          sub_program: "Enduro Home Service"
+        },
+        problems: [
+          {
+            id: "P1",
+            label: "penguatan keterampilan praktis berbasis layanan",
+            title: "Kebutuhan penguatan keterampilan praktis siswa SMK agar lebih aplikatif terhadap konteks layanan nyata.",
+            dimension: "economic",
+            problem_type: "normative_operational_gap",
+            narrative: "Capaian Pembelajaran Teknik Sepeda Motor Fase F telah menargetkan peserta didik mampu mendiagnosis gangguan atau kerusakan dan melakukan tindakan perbaikan pada berbagai sistem sepeda motor, mulai dari engine, sistem pelumasan, sistem pendinginan, sistem bahan bakar, sasis, sistem pemindah tenaga, sistem kelistrikan, hingga engine management system. Namun demikian, target kompetensi normatif tersebut masih perlu diterjemahkan lebih jauh ke dalam pengalaman belajar yang benar-benar aplikatif terhadap kebutuhan layanan nyata di lapangan. Dalam konteks ini, persoalannya bukan bahwa siswa SMK tidak memiliki dasar kompetensi, melainkan bahwa penguatan keterampilan praktis yang lebih dekat dengan situasi servis riil, interaksi langsung dengan kendaraan konsumen, dan penanganan problem teknis secara kontekstual masih menjadi ruang penting untuk diperkuat."
+          },
+          {
+            id: "P2",
+            label: "penguatan kesiapan kerja dan transisi sekolah-ke-kerja",
+            title: "Kebutuhan penguatan kesiapan kerja dan transisi sekolah-ke-dunia kerja atau usaha.",
+            dimension: "economic",
+            problem_type: "school_to_work_transition_gap",
+            narrative: "Pada level kebijakan nasional, Inpres No. 9 Tahun 2016 menegaskan pentingnya revitalisasi SMK guna meningkatkan kualitas dan daya saing sumber daya manusia Indonesia, sedangkan Perpres No. 68 Tahun 2022 memperluas agenda tersebut ke revitalisasi pendidikan vokasi dan pelatihan vokasi agar lebih bermutu, relevan, dan terhubung dengan kebutuhan pembangunan serta dunia kerja. Dengan arah kebijakan seperti ini, siswa SMK pada dasarnya diposisikan bukan hanya sebagai peserta didik yang menguasai kompetensi teknis, tetapi juga sebagai calon tenaga kerja terampil atau calon pelaku usaha yang siap memasuki dunia kerja. Namun dari sisi hasil pasar kerja, data BPS menunjukkan bahwa lulusan SMK masih mencatat Tingkat Pengangguran Terbuka tertinggi pada tahun 2025, yakni sebesar 8,63 persen. Kondisi ini menunjukkan bahwa penguatan kesiapan kerja, kesiapan layanan, dan kesiapan transisi menuju pekerjaan atau usaha mandiri tetap merupakan isu yang relevan untuk dijawab melalui intervensi program."
+          },
+          {
+            id: "P3",
+            label: "kebutuhan kompetensi layanan jemput bola",
+            title: "Kebutuhan penguatan model pembelajaran dan layanan yang selaras dengan orientasi link and match 8+i.",
+            dimension: "social",
+            problem_type: "service_model_gap",
+            narrative: "Arah pengembangan pendidikan vokasi nasional tidak hanya menekankan penguasaan kompetensi teknis, tetapi juga penyelarasan yang lebih kuat dengan dunia kerja. Dalam konteks kebijakan dan diskursus pendidikan vokasi, konsep link and match 8+i digunakan untuk mendorong keselarasan yang lebih bermakna antara satuan pendidikan vokasi dan dunia kerja, termasuk melalui kurikulum yang disusun bersama industri, pembelajaran berbasis proyek nyata, keterlibatan praktisi industri, magang, sertifikasi kompetensi, dan orientasi penyerapan lulusan. Dalam kerangka itu, tantangan yang dihadapi bukan sekadar bagaimana siswa mampu memperbaiki sepeda motor secara teknis, tetapi bagaimana keterampilan tersebut ditransformasikan menjadi kompetensi layanan yang relevan dengan kebutuhan masyarakat. Untuk sub-program Enduro Home Service, ini berarti terdapat kebutuhan penguatan model layanan jemput bola atau home service yang menuntut orientasi pelanggan, respons lapangan, mobilitas layanan, serta penerapan keterampilan teknis dalam konteks kerja yang lebih nyata daripada sekadar praktik bengkel konvensional di sekolah."
+          },
+          {
+            id: "P4",
+            label: "kebutuhan literasi produk Enduro untuk shared value",
+            title: "Kebutuhan penguatan relevansi industri melalui literasi produk pelumas dan penciptaan shared value.",
+            dimension: "economic",
+            problem_type: "industry_relevance_gap",
+            narrative: "Sejalan dengan semangat revitalisasi vokasi dan link and match, pembelajaran siswa SMK juga perlu semakin dekat dengan praktik industri yang aktual. Dalam konteks sub-program ini, penguatan keterampilan teknis servis kendaraan ringan belum cukup apabila tidak diikuti dengan pemahaman mengenai penggunaan produk pelumas yang relevan dalam praktik servis. Karena itu, kebutuhan masalah yang juga muncul adalah bagaimana siswa SMK tidak hanya memahami aspek teknis perbaikan kendaraan, tetapi juga memiliki literasi produk pelumas Enduro sebagai bagian dari layanan servis yang bernilai, meyakinkan, dan sesuai dengan kebutuhan konsumen. Dalam logika TJSL-CSV, titik ini menjadi penting karena menghubungkan peningkatan kompetensi siswa, kualitas layanan kepada masyarakat, dan pembentukan nilai bersama bagi PT Pertamina Lubricants sebagai pelaksana program. Dengan demikian, persoalannya tidak berhenti pada pelatihan teknik semata, tetapi pada kebutuhan membangun keterhubungan yang lebih utuh antara pendidikan vokasi, praktik layanan, dan relevansi industri."
+          }
+        ],
+        beneficiaries: [{ id: "B1", label: "siswa SMK", type: "direct", count: 25 }],
+        valuations: [{ id: "V1", label: "nilai outcome", value_2024: 72576000 }],
+        notes: [{ id: "N1", type: "csv_logic", text: "Shared value dibentuk melalui kompetensi siswa dan literasi produk Enduro." }],
+        column_bindings: { "4": ["P1", "P2", "P3", "P4"], "15": ["B1"] }
+      };
+      return [r];
+    }
+
+    function toNumber(value) {
+      if (typeof value === "number") return Number.isFinite(value) ? value : 0;
+      if (typeof value !== "string") return 0;
+      const cleaned = value.replace(/[^0-9,.-]/g, "").replace(/\.(?=.*\.)/g, "").replace(/,/g, "");
+      const num = parseFloat(cleaned);
+      return Number.isFinite(num) ? num : 0;
+    }
+
+    function formatNumber(value) {
+      return new Intl.NumberFormat("id-ID").format(Number.isFinite(value) ? value : 0);
+    }
+
+    function formatCurrency(value) {
+      return `Rp${formatNumber(value)}`;
+    }
+
+    function extractBeneficiaryCount(record) {
+      const ontologyCounts = Array.isArray(record?.ontology?.beneficiaries)
+        ? record.ontology.beneficiaries.reduce((sum, item) => sum + toNumber(item?.count ?? 0), 0)
+        : 0;
+      if (ontologyCounts > 0) return ontologyCounts;
+      return toNumber(record?.penerima_manfaat || 0);
+    }
+
+    function calcRecordOutcomeValue(record) {
+      const candidates = [
+        record?.nilai_monetisasi_2024,
+        record?.nilai_monetisasi_2023,
+        record?.nilai_monetisasi_2022,
+        record?.monetisasi_2024,
+        record?.monetisasi_2023,
+        record?.monetisasi_2022
+      ].map(toNumber);
+      return candidates.find(v => v > 0) || 0;
+    }
+
+    function calcRecordInvestment(record) {
+      return toNumber(record?.investasi_nominal || 0);
+    }
+
+    function calcSROI(totalOutcome, totalInvestment) {
+      if (!totalInvestment) return 0;
+      return totalOutcome / totalInvestment;
+    }
+
+    function loadRecords() {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) {
+        try {
+          records = JSON.parse(raw);
+        } catch {
+          records = seed();
+        }
+      } else {
+        records = seed();
+        persist();
+      }
+      selectedId = records[0]?.id || null;
+    }
+
+    function persist() {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(records));
+    }
+
+    function getFilteredRecords() {
+      const q = query.trim().toLowerCase();
+      return records.filter(r =>
+        [r.title, r.program, r.sub_program, r.permasalahan, r.penerima_manfaat].join(" ").toLowerCase().includes(q)
+      );
+    }
+
+    function getSelectedRecord(filtered) {
+      return filtered.find(r => r.id === selectedId) || filtered[0] || null;
+    }
+
+    function dashboardStats() {
+      const totalSubPrograms = records.length;
+      const totalInvestment = records.reduce((sum, r) => sum + calcRecordInvestment(r), 0);
+      const totalBeneficiaries = records.reduce((sum, r) => sum + extractBeneficiaryCount(r), 0);
+      const totalOutcomeValue = records.reduce((sum, r) => sum + calcRecordOutcomeValue(r), 0);
+      const sroi = calcSROI(totalOutcomeValue, totalInvestment);
+      return { totalSubPrograms, totalInvestment, totalBeneficiaries, totalOutcomeValue, sroi };
+    }
+
+    function renderStats() {
+      const stats = dashboardStats();
+      const items = [
+        { title: "Jumlah Sub Program", value: formatNumber(stats.totalSubPrograms), helper: "Total row/sub-program tersimpan", icon: iconMap.subprogram },
+        { title: "Total Investasi", value: formatCurrency(stats.totalInvestment), helper: "Akumulasi kolom investasi nominal", icon: iconMap.investasi },
+        { title: "Total Penerima Manfaat", value: formatNumber(stats.totalBeneficiaries), helper: "Diambil dari count ontologi atau angka pada kolom", icon: iconMap.manfaat },
+        { title: "Total Nilai Outcome", value: formatCurrency(stats.totalOutcomeValue), helper: "Mengutamakan nilai monetisasi final, lalu gross value", icon: iconMap.outcome },
+        { title: "Nilai SROI", value: stats.sroi ? `${stats.sroi.toFixed(2)}x` : "0.00x", helper: "Total nilai outcome ÷ total investasi", icon: iconMap.sroi }
+      ];
+      document.getElementById("statsGrid").innerHTML = items.map(item => `
+        <div class="stat-card">
+          <div>
+            <div class="stat-title">${item.title}</div>
+            <div class="stat-value">${item.value}</div>
+            <div class="stat-helper">${item.helper}</div>
+          </div>
+          <div class="stat-icon">${item.icon}</div>
+        </div>
+      `).join("");
+    }
+
+    function renderRecordList(filtered, selected) {
+      const root = document.getElementById("recordList");
+      if (!filtered.length) {
+        root.innerHTML = `<div class="muted">Tidak ada data.</div>`;
+        return;
+      }
+      root.innerHTML = filtered.map(r => `
+        <div class="record-item ${selected?.id === r.id ? 'active' : ''}" data-id="${r.id}">
+          <div style="font-weight:700;">${escapeHtml(r.title || r.sub_program || 'Tanpa Judul')}</div>
+          <div class="meta">${escapeHtml(r.program || '-')}</div>
+          <div style="margin-top:10px;"><span class="badge">${escapeHtml(r.sub_program || '-')}</span></div>
+        </div>
+      `).join("");
+
+      root.querySelectorAll('.record-item').forEach(el => {
+        el.addEventListener('click', () => {
+          selectedId = el.dataset.id;
+          renderApp();
+        });
+      });
+    }
+
+    function sectionDetails(title, content, open = false) {
+      return `
+        <details class="section" ${open ? 'open' : ''}>
+          <summary>${title}<span class="summary-arrow">›</span></summary>
+          <div class="section-content">${content}</div>
+        </details>
+      `;
+    }
+
+    function infoBox(title, content) {
+      return `
+        <div class="info-box">
+          <div class="box-title">${title}</div>
+          <div class="box-content">${escapeHtml(content || 'Belum diisi')}</div>
+        </div>
+      `;
+    }
+
+    function flowBox(title, content) {
+      return `
+        <div class="flow-box">
+          <div class="box-title">${title}</div>
+          <div class="box-content">${escapeHtml(content || 'Belum diisi')}</div>
+        </div>
+      `;
+    }
+
+    function renderDetail(selected) {
+      const root = document.getElementById('detailRoot');
+      if (!selected) {
+        root.innerHTML = `
+          <div class="card empty-state">
+            <div>
+              <div style="font-size:20px; font-weight:700; color:var(--text);">Belum ada record dipilih</div>
+              <div style="margin-top:8px;">Tambahkan data pertama Anda untuk mulai mengelola 40 kolom dan struktur ontologi.</div>
+            </div>
+          </div>
+        `;
+        return;
+      }
+
+      const problems = Array.isArray(selected?.ontology?.problems) ? selected.ontology.problems : [];
+      const problemHtml = problems.length
+        ? `<div class="problem-stack">${problems.map((problem, idx) => `
+            <div class="problem-box">
+              <div class="problem-title">${escapeHtml((problem.id || `P${idx + 1}`) + '. ' + (problem.title || problem.label || 'Tanpa Judul Masalah'))}</div>
+              <div class="box-content" style="margin-top:10px;">${escapeHtml(problem.narrative || problem.description || 'Belum ada narasi detail.')}</div>
+              <div class="problem-meta">
+                ${problem.dimension ? `<span class="badge">Dimensi: ${escapeHtml(problem.dimension)}</span>` : ''}
+                ${problem.problem_type ? `<span class="badge">Tipe: ${escapeHtml(problem.problem_type)}</span>` : ''}
+              </div>
+            </div>
+          `).join('')}</div>`
+        : `<div class="muted">Belum ada narasi detail permasalahan pada struktur ontologi.</div>`;
+
+      const tableAccordion = groupedColumns.map(({ group, columns }) => `
+        <details class="table-group" ${group === 'Identitas' || group === 'Framing' ? 'open' : ''}>
+          <summary>${group}<span class="summary-arrow">›</span></summary>
+          <div style="overflow:auto;">
+            <table>
+              <thead>
+                <tr><th style="width:320px;">Kolom</th><th>Isi</th></tr>
+              </thead>
+              <tbody>
+                ${columns.map(col => `
+                  <tr>
+                    <td><strong>${escapeHtml(col.label)}</strong></td>
+                    <td>${selected[col.key] ? escapeHtml(selected[col.key]) : '<span class="muted">Belum diisi</span>'}</td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>
+        </details>
+      `).join('');
+
+      root.innerHTML = `
+        <div class="detail-actions">
+          <button class="btn" id="editBtn">Edit</button>
+          <button class="btn danger" id="deleteBtn">Hapus</button>
+        </div>
+
+        <div class="hero-card">
+          <h2>${escapeHtml(selected.title || selected.sub_program || 'Tanpa Judul')}</h2>
+          <div class="badges">
+            <span class="badge">Program: ${escapeHtml(selected.program || '-')}</span>
+            <span class="badge">Sub-program: ${escapeHtml(selected.sub_program || '-')}</span>
+            <span class="badge">Lokasi: ${escapeHtml(selected.lokasi_pelaksanaan || '-')}</span>
           </div>
         </div>
 
-        {/* Detail */}
-        <div>
-          {selected?(
-            <div className="flex flex-col" style={{gap:12}}>
-              <div className="flex justify-end gap-8">
-                <button className="btn btn-outline btn-sm" onClick={()=>{setEditing(selected);setOpenForm(true);}}><IconEdit size={12}/>Edit</button>
-                <button className="btn btn-danger btn-sm" onClick={()=>delRec(selected.id)}><IconTrash size={12}/>Hapus</button>
-              </div>
+        <div class="section-stack">
+          ${sectionDetails('Framing Program', `
+            <div class="info-grid" style="margin-bottom:14px;">
+              ${infoBox('Permasalahan (Ringkas)', selected.permasalahan)}
+              ${infoBox('Penerima Manfaat', selected.penerima_manfaat)}
+            </div>
+            <div class="card" style="border-radius:22px; box-shadow:none; background:#f8fafc;">
+              <div class="panel-head" style="padding-bottom:12px;"><h3 class="panel-title" style="font-size:16px;">Narasi Detail Permasalahan</h3></div>
+              <div class="panel-body" style="padding-top:0;">${problemHtml}</div>
+            </div>
+          `, true)}
 
-              <div className="tabs-list">
-                <button className={`tab-btn ${detailTab==="detail"?"active":""}`} onClick={()=>setDetailTab("detail")}>Detail Program</button>
-                <button className={`tab-btn ${detailTab==="table"?"active":""}`} onClick={()=>setDetailTab("table")}>Tabel 40 Kolom</button>
-              </div>
+          ${sectionDetails('Intervensi', `
+            <div class="info-grid">
+              ${infoBox('Kegiatan', [selected.kegiatan_tahun, selected.kegiatan_bentuk, selected.kegiatan_uraian].filter(Boolean).join(' • '))}
+              ${infoBox('Stakeholder', [selected.stakeholder_jenis, selected.stakeholder_peran].filter(Boolean).join(' • '))}
+              ${infoBox('Investasi', [selected.investasi_tahun, selected.investasi_bentuk, selected.investasi_nominal].filter(Boolean).join(' • '))}
+              ${infoBox('Output', selected.output)}
+            </div>
+          `, true)}
 
-              {detailTab==="detail"&&<PitchView record={selected} dashboardStats={stats}/>}
+          ${sectionDetails('Theory of Change Ringkas', `
+            <div class="flow-grid">
+              ${flowBox('Baseline', [selected.kondisi_sebelum_ekonomi, selected.kondisi_sebelum_sosial, selected.kondisi_sebelum_lingkungan, selected.kondisi_sebelum_wellbeing].filter(Boolean).join('\n\n'))}
+              ${flowBox('Output', selected.output)}
+              ${flowBox('Outcome', [selected.outcome_ekonomi, selected.outcome_sosial, selected.outcome_lingkungan, selected.outcome_wellbeing].filter(Boolean).join('\n\n'))}
+              ${flowBox('Indikator', [selected.indikator_ekonomi, selected.indikator_sosial, selected.indikator_lingkungan, selected.indikator_wellbeing].filter(Boolean).join('\n\n'))}
+            </div>
+          `)}
 
-              {detailTab==="table"&&(
-                <div className="card" style={{padding:20}}>
-                  {groupedColumns.map(({group,columns})=>(
-                    <Accordion key={group} label={group} defaultOpen={["Identitas","Framing"].includes(group)}>
-                      <table className="tbl">
-                        <thead><tr><th>Kolom</th><th>Isi</th></tr></thead>
-                        <tbody>
-                          {columns.map(col=>(
-                            <tr key={col.key}>
-                              <td>{col.label}</td>
-                              <td className="pre">{selected[col.key]||<span className="tbl-empty">Belum diisi</span>}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </Accordion>
-                  ))}
+          ${sectionDetails('SROI Snapshot', `
+            <div class="info-grid">
+              ${infoBox('Monetisasi Sebelum Fiksasi', [selected.monetisasi_aspek, selected.monetisasi_2022, selected.monetisasi_2023, selected.monetisasi_2024].filter(Boolean).join(' • '))}
+              ${infoBox('Fiksasi Dampak', [`Deadweight: ${selected.deadweight || '-'}`, `Attribution: ${selected.attribution || '-'}`, `Drop Off: ${selected.drop_off || '-'}`].join(' • '))}
+              ${infoBox('Nilai Final', [selected.nilai_monetisasi_aspek, selected.nilai_monetisasi_2022, selected.nilai_monetisasi_2023, selected.nilai_monetisasi_2024].filter(Boolean).join(' • '))}
+            </div>
+          `)}
+
+          ${sectionDetails('Struktur Data Ontologi', `<div class="json-box">${escapeHtml(JSON.stringify(selected.ontology, null, 2))}</div>`, true)}
+        </div>
+
+        <div class="card table-card">
+          <div class="panel-head"><h3 class="panel-title">Tabel 40 Kolom</h3></div>
+          <div class="panel-body">
+            <div class="accordion-stack">${tableAccordion}</div>
+          </div>
+        </div>
+      `;
+
+      document.getElementById('editBtn').addEventListener('click', () => openModal(selected.id));
+      document.getElementById('deleteBtn').addEventListener('click', () => deleteRecord(selected.id));
+    }
+
+    function buildColumnForm() {
+      const root = document.getElementById('columnGroups');
+      root.innerHTML = groupedColumns.map(({ group, columns }) => `
+        <details class="group-box" open>
+          <summary>${group}</summary>
+          <div class="group-content">
+            <div class="form-grid">
+              ${columns.map(col => `
+                <div class="field">
+                  <label for="field-${col.key}">${escapeHtml(col.label)}</label>
+                  <textarea id="field-${col.key}" data-key="${col.key}"></textarea>
                 </div>
-              )}
+              `).join('')}
             </div>
-          ):(
-            <div className="card flex flex-col items-center justify-center" style={{height:"72vh",gap:12}}>
-              <IconBar size={36} color="var(--border-strong)"/>
-              <p className="display" style={{fontSize:15,fontWeight:700,color:"var(--text-secondary)"}}>Belum ada record dipilih</p>
-              <p className="text-muted" style={{fontSize:12}}>Tambahkan data pertama untuk mulai.</p>
-            </div>
-          )}
-        </div>
-      </div>
+          </div>
+        </details>
+      `).join('');
+    }
 
-      <RecordForm open={openForm} onClose={()=>setOpenForm(false)} onSave={saveRec} initial={editing}/>
-    </div>
-  );
-}
+    function openModal(recordId = null) {
+      editingId = recordId;
+      const record = recordId ? records.find(r => r.id === recordId) : emptyRecord();
+      document.getElementById('modalTitle').textContent = recordId ? 'Edit Record' : 'Tambah Record';
+      document.getElementById('field-title').value = record.title || '';
+      document.getElementById('field-rowid').value = record.ontology?.row_id || '';
+      COLUMN_SCHEMA.forEach(col => {
+        const el = document.getElementById(`field-${col.key}`);
+        if (el) el.value = record[col.key] || '';
+      });
+      document.getElementById('ontologyText').value = JSON.stringify(record.ontology || emptyOntology(), null, 2);
+      document.getElementById('recordModal').classList.add('open');
+      setActiveTab('columns');
+    }
 
-ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
-</script>
+    function closeModal() {
+      document.getElementById('recordModal').classList.remove('open');
+      editingId = null;
+    }
+
+    function setActiveTab(tab) {
+      document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.toggle('active', btn.dataset.tab === tab));
+      document.getElementById('tab-columns').classList.toggle('active', tab === 'columns');
+      document.getElementById('tab-ontology').classList.toggle('active', tab === 'ontology');
+    }
+
+    function saveRecord() {
+      let ontology;
+      try {
+        ontology = JSON.parse(document.getElementById('ontologyText').value || '{}');
+      } catch {
+        alert('JSON ontologi belum valid.');
+        return;
+      }
+
+      let record = editingId ? records.find(r => r.id === editingId) : emptyRecord();
+      if (!record) record = emptyRecord();
+
+      record.title = document.getElementById('field-title').value.trim();
+      record.ontology = ontology;
+      record.ontology.row_id = document.getElementById('field-rowid').value.trim();
+      record.updated_at = new Date().toISOString();
+      COLUMN_SCHEMA.forEach(col => {
+        const el = document.getElementById(`field-${col.key}`);
+        record[col.key] = el ? el.value : '';
+      });
+      record.title = record.title || record.sub_program || record.program || 'Tanpa Judul';
+
+      const exists = records.some(r => r.id === record.id);
+      records = exists ? records.map(r => r.id === record.id ? record : r) : [record, ...records];
+      selectedId = record.id;
+      persist();
+      closeModal();
+      renderApp();
+    }
+
+    function deleteRecord(id) {
+      if (!confirm('Hapus record ini?')) return;
+      records = records.filter(r => r.id !== id);
+      if (selectedId === id) selectedId = records[0]?.id || null;
+      persist();
+      renderApp();
+    }
+
+    function exportJson() {
+      const blob = new Blob([JSON.stringify(records, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'tjsl-csv-records.json';
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+
+    function importJson(file) {
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        try {
+          const parsed = JSON.parse(e.target.result);
+          if (!Array.isArray(parsed)) throw new Error();
+          records = parsed;
+          selectedId = records[0]?.id || null;
+          persist();
+          renderApp();
+        } catch {
+          alert('File JSON tidak valid.');
+        }
+      };
+      reader.readAsText(file);
+    }
+
+    function escapeHtml(value) {
+      return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+    }
+
+    function renderApp() {
+      const filtered = getFilteredRecords();
+      const selected = getSelectedRecord(filtered);
+      if (!selectedId && selected) selectedId = selected.id;
+      renderStats();
+      renderRecordList(filtered, selected);
+      renderDetail(selected);
+    }
+
+    function bindEvents() {
+      document.getElementById('searchInput').addEventListener('input', (e) => {
+        query = e.target.value;
+        renderApp();
+      });
+      document.getElementById('addBtn').addEventListener('click', () => openModal());
+      document.getElementById('exportBtn').addEventListener('click', exportJson);
+      document.getElementById('importInput').addEventListener('change', (e) => importJson(e.target.files?.[0]));
+      document.getElementById('closeModalBtn').addEventListener('click', closeModal);
+      document.getElementById('cancelBtn').addEventListener('click', closeModal);
+      document.getElementById('saveBtn').addEventListener('click', saveRecord);
+      document.querySelectorAll('.tab-btn').forEach(btn => btn.addEventListener('click', () => setActiveTab(btn.dataset.tab)));
+      document.getElementById('field-rowid').addEventListener('input', (e) => {
+        try {
+          const obj = JSON.parse(document.getElementById('ontologyText').value || '{}');
+          obj.row_id = e.target.value;
+          document.getElementById('ontologyText').value = JSON.stringify(obj, null, 2);
+        } catch {}
+      });
+      document.getElementById('recordModal').addEventListener('click', (e) => {
+        if (e.target.id === 'recordModal') closeModal();
+      });
+    }
+
+    buildColumnForm();
+    loadRecords();
+    bindEvents();
+    renderApp();
+  </script>
 </body>
 </html>
