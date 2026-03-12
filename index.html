@@ -1,177 +1,750 @@
-<!DOCTYPE html>
-<html lang="id">
+<!DOCTYPE html><html lang="id">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SROI Ontology Manager</title>
-    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
-    <script src="https://cdn.tailwindcss.com"></script>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>TJSL CSV Analyzer – Ontology Driven</title>
+  <style>
+    :root {
+      --bg: #f1f5f9;
+      --card: #ffffff;
+      --muted: #64748b;
+      --text: #0f172a;
+      --border: #e2e8f0;
+      --soft: #f8fafc;
+      --primary: #0f172a;
+      --danger: #b91c1c;
+      --shadow: 0 1px 2px rgba(15,23,42,.06), 0 8px 24px rgba(15,23,42,.04);
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: Inter, system-ui, sans-serif; background: var(--bg); color: var(--text); }
+    button, input, textarea { font: inherit; }
+    .container { max-width: 1480px; margin: 0 auto; padding: 24px; }
+    .topbar { display:flex; justify-content:space-between; gap:16px; flex-wrap:wrap; margin-bottom:24px; }
+    h1 { margin:0; font-size:32px; line-height:1.1; }
+    .subtitle { margin:6px 0 0; color: var(--muted); }
+    .actions { display:flex; gap:10px; flex-wrap:wrap; position:relative; }
+    .btn { border:1px solid var(--border); background:var(--card); color:var(--text); padding:12px 16px; border-radius:16px; cursor:pointer; font-weight:600; }
+    .btn.primary { background:var(--primary); color:white; border-color:var(--primary); }
+    .btn.danger { background:var(--danger); color:white; border-color:var(--danger); }
+    .btn:hover { box-shadow: var(--shadow); transform: translateY(-1px); }
+    .hidden { display:none !important; }
+    .json-menu-wrap { position:relative; }
+    .json-menu { position:absolute; top:calc(100% + 8px); right:0; min-width:190px; background:white; border:1px solid var(--border); border-radius:18px; box-shadow:var(--shadow); padding:8px; z-index:30; }
+    .json-menu-item { width:100%; display:block; text-align:left; border:0; background:transparent; padding:10px 12px; border-radius:12px; cursor:pointer; }
+    .json-menu-item:hover { background:var(--soft); }
+    .stats-grid { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:16px; margin-bottom:24px; }
+    .card, .stat-card { background:var(--card); border:1px solid var(--border); border-radius:28px; box-shadow:var(--shadow); }
+    .stat-card { padding:20px; display:flex; justify-content:space-between; gap:12px; min-height:136px; }
+    .stat-title { color:var(--muted); font-size:14px; margin-bottom:10px; }
+    .stat-value { font-size:32px; font-weight:800; line-height:1.05; word-break:break-word; }
+    .stat-helper { margin-top:8px; font-size:12px; color:#94a3b8; }
+    .stat-icon { min-width:64px; min-height:64px; display:grid; place-items:center; background:#f1f5f9; border-radius:22px; font-size:28px; }
+    .main-grid { display:grid; grid-template-columns:340px 1fr; gap:24px; }
+    .panel-head { padding:20px 20px 0; }
+    .panel-body { padding:20px; }
+    .panel-title { margin:0 0 4px; font-size:20px; }
+    .search-wrap { position:relative; margin-top:12px; }
+    .search-wrap input { width:100%; border:1px solid var(--border); background:var(--soft); padding:12px 14px 12px 40px; border-radius:16px; }
+    .search-icon { position:absolute; left:14px; top:50%; transform:translateY(-50%); color:#94a3b8; }
+    .record-list { display:flex; flex-direction:column; gap:12px; max-height:calc(100vh - 300px); overflow:auto; padding-right:4px; }
+    .record-item { border:1px solid var(--border); border-radius:22px; background:white; padding:16px; cursor:pointer; }
+    .record-item.active { background:var(--primary); color:white; border-color:var(--primary); }
+    .record-item .meta { margin-top:8px; font-size:12px; opacity:.8; }
+    .badge { display:inline-flex; align-items:center; gap:6px; border:1px solid var(--border); border-radius:999px; padding:6px 10px; font-size:12px; background:white; }
+    .record-item.active .badge { background:rgba(255,255,255,.12); color:white; border-color:rgba(255,255,255,.16); }
+    .hero-card { padding:22px; background:linear-gradient(135deg,#f8fafc,#fff); border:1px solid var(--border); border-radius:28px; box-shadow:var(--shadow); }
+    .hero-card h2 { margin:0 0 12px; font-size:30px; }
+    .badges { display:flex; gap:8px; flex-wrap:wrap; }
+    .detail-actions { display:flex; justify-content:flex-end; gap:10px; margin-bottom:12px; flex-wrap:wrap; }
+    .section-stack { display:flex; flex-direction:column; gap:14px; margin-top:14px; }
+    details.section, details.table-group { background:white; border:1px solid var(--border); border-radius:24px; box-shadow:var(--shadow); overflow:hidden; }
+    details.section > summary, details.table-group > summary { list-style:none; cursor:pointer; padding:18px 22px; font-weight:700; display:flex; align-items:center; justify-content:space-between; }
+    details.section > summary::-webkit-details-marker, details.table-group > summary::-webkit-details-marker { display:none; }
+    .summary-arrow { transition:transform .2s ease; }
+    details[open] .summary-arrow { transform:rotate(90deg); }
+    .section-content { padding:0 22px 22px; }
+    .info-grid { display:grid; grid-template-columns:repeat(2,1fr); gap:14px; }
+    .info-box, .node-card, .flow-box { border:1px solid var(--border); border-radius:22px; padding:16px; }
+    .info-box { background:var(--soft); min-height:120px; }
+    .flow-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:14px; }
+    .flow-box, .node-card { background:white; }
+    .flow-box { min-height:170px; }
+    .box-title { font-size:13px; color:var(--muted); margin-bottom:10px; font-weight:600; }
+    .box-content { font-size:14px; line-height:1.75; white-space:pre-wrap; }
+    .node-stack { display:flex; flex-direction:column; gap:14px; }
+    .node-title { font-weight:800; font-size:18px; line-height:1.5; }
+    .node-meta { display:flex; gap:8px; flex-wrap:wrap; margin-top:12px; }
+    .json-box { background:#020617; color:#e2e8f0; border-radius:24px; padding:18px; overflow:auto; font-size:12px; line-height:1.6; white-space:pre-wrap; }
+    table { width:100%; border-collapse:collapse; font-size:14px; }
+    th, td { text-align:left; vertical-align:top; padding:12px 14px; border-top:1px solid var(--border); }
+    th { background:var(--soft); }
+    .muted { color:var(--muted); }
+    .empty-state { min-height:420px; display:grid; place-items:center; text-align:center; }
+    .modal { position:fixed; inset:0; background:rgba(15,23,42,.45); display:none; align-items:center; justify-content:center; padding:20px; z-index:60; }
+    .modal.open { display:flex; }
+    .modal-card { width:min(1260px,100%); height:min(92vh,980px); background:white; border-radius:28px; box-shadow:var(--shadow); display:flex; flex-direction:column; overflow:hidden; }
+    .modal-head { padding:20px 24px 0; display:flex; justify-content:space-between; gap:12px; align-items:center; }
+    .modal-tabs { display:flex; gap:8px; padding:16px 24px 0; }
+    .tab-btn { padding:10px 14px; border-radius:14px; border:1px solid var(--border); background:white; cursor:pointer; font-weight:600; }
+    .tab-btn.active { background:var(--primary); color:white; border-color:var(--primary); }
+    .modal-body { flex:1; overflow:hidden; padding:16px 24px 0; }
+    .tab-panel { display:none; height:100%; }
+    .tab-panel.active { display:block; }
+    .scroll-pane { height:100%; overflow:auto; padding-right:8px; }
+    .field-grid { display:grid; grid-template-columns:repeat(2,1fr); gap:14px; }
+    .field { display:flex; flex-direction:column; gap:8px; }
+    .field label { font-size:14px; font-weight:600; }
+    .field input, .field textarea { width:100%; border:1px solid var(--border); border-radius:16px; padding:12px 14px; }
+    .field textarea { min-height:140px; resize:vertical; }
+    .modal-foot { padding:16px 24px 20px; display:flex; justify-content:flex-end; gap:10px; }
+    @media (max-width:1200px) {
+      .stats-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+      .main-grid { grid-template-columns:1fr; }
+      .record-list { max-height:320px; }
+      .flow-grid { grid-template-columns:repeat(2,1fr); }
+    }
+    @media (max-width:720px) {
+      .container { padding:16px; }
+      .stats-grid, .info-grid, .flow-grid, .field-grid { grid-template-columns:1fr; }
+      h1 { font-size:26px; }
+      .modal-card { height:95vh; }
+    }
+  </style>
 </head>
-<body class="bg-gray-50 text-gray-800">
-
-<div id="app" class="p-6">
-    <header class="mb-8 flex justify-between items-center bg-white p-4 rounded-lg shadow-sm">
-        <div>
-            <h1 class="text-2xl font-bold text-blue-600">SROI Ontology Editor</h1>
-            <p class="text-sm text-gray-500">ID: {{ ontology.ontology_meta.ontology_id || 'Tanpa ID' }} | Status: {{ ontology.ontology_meta.status }}</p>
+<body>
+  <div class="container">
+    <div class="topbar">
+      <div>
+        <h1>TJSL CSV Analyzer – Ontology Driven</h1>
+        <p class="subtitle">Ontology JSON menjadi source of truth. Tabel 56 kolom hanyalah hasil render.</p>
+      </div>
+      <div class="actions">
+        <button class="btn primary" id="addBtn">Tambah</button>
+        <div class="json-menu-wrap">
+          <button class="btn" id="jsonMenuBtn">JSON ▾</button>
+          <div class="json-menu hidden" id="jsonMenu">
+            <button class="json-menu-item" id="openSnippetBtn" type="button">Snippet</button>
+            <button class="json-menu-item" id="exportBtn" type="button">Export JSON</button>
+            <label class="json-menu-item" for="importInput">Import JSON</label>
+          </div>
         </div>
-        <div class="space-x-2">
-            <button @click="exportJSON" class="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700">Export JSON</button>
-            <button @click="resetData" class="bg-red-100 text-red-600 px-4 py-2 rounded hover:bg-red-200">Reset</button>
-        </div>
-    </header>
+        <input id="importInput" type="file" accept="application/json" class="hidden" />
+      </div>
+    </div><div class="stats-grid" id="statsGrid"></div>
 
-    <div class="grid grid-cols-1 lg:grid-cols-4 gap-6">
-        
-        <div class="lg:col-span-1 space-y-6">
-            <section class="bg-white p-4 rounded-lg shadow">
-                <h2 class="font-bold border-b mb-4 pb-2">Identity</h2>
-                <div class="space-y-3">
-                    <div v-for="(val, key) in ontology.identity" :key="key">
-                        <label class="block text-xs font-semibold uppercase text-gray-500">{{ key.replace('_', ' ') }}</label>
-                        <input v-model="ontology.identity[key]" type="text" class="w-full border rounded p-1 text-sm focus:ring-2 focus:ring-blue-500">
-                    </div>
-                </div>
-            </section>
-        </div>
-
-        <div class="lg:col-span-3 space-y-6">
-            
-            <section class="bg-white p-4 rounded-lg shadow">
-                <h2 class="font-bold border-b mb-4 pb-2">Add New Node</h2>
-                <div class="flex gap-2 flex-wrap">
-                    <button @click="addNode('problem_nodes', 'P')" class="bg-blue-50 text-blue-700 px-3 py-1 rounded-full border border-blue-200 hover:bg-blue-100 text-sm">+ Problem</button>
-                    <button @click="addNode('activity_nodes', 'A')" class="bg-green-50 text-green-700 px-3 py-1 rounded-full border border-green-200 hover:bg-green-100 text-sm">+ Activity</button>
-                    <button @click="addNode('stakeholder_nodes', 'S')" class="bg-purple-50 text-purple-700 px-3 py-1 rounded-full border border-purple-200 hover:bg-purple-100 text-sm">+ Stakeholder</button>
-                    <button @click="addNode('outcome_nodes', 'OC')" class="bg-yellow-50 text-yellow-700 px-3 py-1 rounded-full border border-yellow-200 hover:bg-yellow-100 text-sm">+ Outcome</button>
-                </div>
-            </section>
-
-            <section v-if="ontology.problem_nodes.length > 0" class="bg-white p-4 rounded-lg shadow">
-                <h2 class="font-bold text-red-600 mb-4 flex items-center">
-                    <span class="mr-2">🚩</span> Problem Nodes
-                </h2>
-                <div class="overflow-x-auto">
-                    <table class="w-full text-left text-sm">
-                        <thead class="bg-gray-50">
-                            <tr>
-                                <th class="p-2 border">ID</th>
-                                <th class="p-2 border">Label</th>
-                                <th class="p-2 border">Dimension</th>
-                                <th class="p-2 border">Aksi</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <tr v-for="(node, index) in ontology.problem_nodes" :key="node.id">
-                                <td class="p-2 border font-mono text-xs">{{ node.id }}</td>
-                                <td class="p-2 border"><input v-model="node.label" class="w-full"></td>
-                                <td class="p-2 border">
-                                    <select v-model="node.dimension" class="w-full">
-                                        <option value="economic">Economic</option>
-                                        <option value="social">Social</option>
-                                        <option value="environmental">Environmental</option>
-                                    </select>
-                                </td>
-                                <td class="p-2 border">
-                                    <button @click="deleteNode('problem_nodes', index)" class="text-red-500 hover:underline">Hapus</button>
-                                </td>
-                            </tr>
-                        </tbody>
-                    </table>
-                </div>
-            </section>
-
-            <section class="bg-gray-800 p-4 rounded-lg shadow">
-                <h2 class="text-white font-bold mb-2">Live Ontology Output (JSON)</h2>
-                <pre class="text-green-400 text-xs overflow-auto max-h-64">{{ JSON.stringify(ontology, null, 2) }}</pre>
-            </section>
-
-        </div>
+<div class="main-grid">
+  <div class="card">
+    <div class="panel-head">
+      <h2 class="panel-title">Daftar Ontology</h2>
+      <div class="search-wrap">
+        <span class="search-icon">⌕</span>
+        <input id="searchInput" placeholder="Cari program / sub-program / ontology ID..." />
+      </div>
     </div>
+    <div class="panel-body"><div class="record-list" id="recordList"></div></div>
+  </div>
+  <div id="detailRoot"></div>
 </div>
 
-<script>
-const { createApp } = Vue
+  </div>  <div class="modal" id="ontologyModal">
+    <div class="modal-card">
+      <div class="modal-head">
+        <h2 id="modalTitle">Tambah Ontology</h2>
+        <button class="btn" id="closeModalBtn">Tutup</button>
+      </div>
+      <div class="modal-tabs">
+        <button class="tab-btn active" data-tab="ontology">Ontology JSON</button>
+        <button class="tab-btn" data-tab="spec">Render Spec Ringkas</button>
+      </div>
+      <div class="modal-body">
+        <div class="tab-panel active" id="tab-ontology">
+          <div class="field-grid">
+            <div class="field">
+              <label for="recordTitle">Judul Record</label>
+              <input id="recordTitle" placeholder="Mis. Enduro Home Service" />
+            </div>
+            <div class="field">
+              <label for="ontologyIdMirror">Ontology ID</label>
+              <input id="ontologyIdMirror" placeholder="ONT_EHS_001" />
+            </div>
+          </div>
+          <div class="field" style="margin-top:14px; height:calc(100% - 90px);">
+            <label for="ontologyText">Paste / Edit Ontology JSON</label>
+            <textarea id="ontologyText" style="height:100%; min-height:420px; font-family:ui-monospace,monospace; font-size:12px;"></textarea>
+          </div>
+        </div>
+        <div class="tab-panel" id="tab-spec">
+          <div class="scroll-pane">
+            <div class="card" style="border-radius:22px; box-shadow:none;">
+              <div class="panel-head"><h3 class="panel-title" style="font-size:16px;">Ringkasan Arsitektur</h3></div>
+              <div class="panel-body muted" style="line-height:1.8;">
+                <p>Ontology JSON adalah source of truth.</p>
+                <p>56 kolom final dirender dari node ontology berdasarkan render specification.</p>
+                <p>Field [S] mengambil satu nilai dari satu path. Field [M] merender banyak node ke satu field, compact untuk tabel dan card-stack untuk rich UI.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-foot">
+        <button class="btn" id="cancelBtn">Batal</button>
+        <button class="btn primary" id="saveBtn">Simpan</button>
+      </div>
+    </div>
+  </div>  <div class="modal" id="snippetModal">
+    <div class="modal-card" style="width:min(1100px,100%); height:min(88vh,920px);">
+      <div class="modal-head">
+        <h2>JSON Snippet Importer</h2>
+        <button class="btn" id="closeSnippetModalBtn">Tutup</button>
+      </div>
+      <div class="modal-body" style="padding-top:20px;">
+        <div class="field-grid" style="grid-template-columns:1fr 1fr; height:calc(100% - 20px);">
+          <div class="card" style="border-radius:22px; box-shadow:none; overflow:hidden;">
+            <div class="panel-head"><h3 class="panel-title" style="font-size:16px;">Paste JSON Snippet</h3></div>
+            <div class="panel-body" style="padding-top:0; height:calc(100% - 80px);">
+              <textarea id="snippetText" style="width:100%; height:100%; min-height:420px; font-family:ui-monospace,monospace; font-size:12px;"></textarea>
+            </div>
+          </div>
+          <div class="card" style="border-radius:22px; box-shadow:none; overflow:hidden;">
+            <div class="panel-head"><h3 class="panel-title" style="font-size:16px;">Preview Target Render</h3></div>
+            <div class="panel-body" style="padding-top:0;"><div id="snippetPreview" class="scroll-pane" style="height:100%; max-height:56vh;"></div></div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-foot" style="justify-content:space-between; align-items:center; flex-wrap:wrap;">
+        <div class="muted" style="font-size:13px;">Preview menampilkan hasil render compact ke kolom target sebelum diterapkan.</div>
+        <div style="display:flex; gap:10px; flex-wrap:wrap;">
+          <button class="btn" id="previewSnippetBtn">Preview</button>
+          <button class="btn" id="applyReplaceBtn">Replace</button>
+          <button class="btn" id="applyAppendBtn">Append</button>
+          <button class="btn primary" id="applyMergeBtn">Merge</button>
+        </div>
+      </div>
+    </div>
+  </div>  <script>
+    const COLUMN_SPEC = [
+      { no: 1, label: 'Nama CDO', type: 'S', source: 'identity.cdo_name' },
+      { no: 2, label: 'Unit Kerja', type: 'S', source: 'identity.unit_kerja' },
+      { no: 3, label: 'Lokasi Pelaksanaan', type: 'S', source: 'identity.lokasi_pelaksanaan' },
+      { no: 4, label: 'Program', type: 'S', source: 'identity.program' },
+      { no: 5, label: 'Sub-Program', type: 'S', source: 'identity.sub_program' },
+      { no: 6, label: 'Kode Row / ID Analisis', type: 'S', source: 'ontology_meta.ontology_id' },
+      { no: 7, label: 'Permasalahan Utama', type: 'M', source: 'problem_nodes', compact: problemMainCompact },
+      { no: 8, label: 'Permasalahan Turunan / Node Masalah', type: 'M', source: 'problem_nodes', compact: problemNodeCompact },
+      { no: 9, label: 'Justifikasi Akademik / Kebijakan Permasalahan', type: 'M', source: 'problem_nodes', compact: problemJustificationCompact },
+      { no: 10, label: 'Kegiatan (Tahun)', type: 'M', source: 'activity_nodes', compact: (o) => renderList(o.activity_nodes, n => `${n.id}. ${n.year || '-'}`) },
+      { no: 11, label: 'Kegiatan (Bentuk)', type: 'M', source: 'activity_nodes', compact: (o) => renderList(o.activity_nodes, n => `${n.id}. ${n.form || ''}`) },
+      { no: 12, label: 'Kegiatan (Uraian)', type: 'M', source: 'activity_nodes', compact: (o) => renderList(o.activity_nodes, n => `${n.id}. ${[n.label, n.description].filter(Boolean).join(' — ')}`) },
+      { no: 13, label: 'Masalah yang Dijawab oleh Kegiatan', type: 'M', source: 'activity_nodes', compact: activityProblemCompact },
+      { no: 14, label: 'Stakeholder (Jenis)', type: 'M', source: 'stakeholder_nodes', compact: (o) => renderList(o.stakeholder_nodes, n => `${n.id}. ${n.jenis || ''}`) },
+      { no: 15, label: 'Stakeholder (Peran)', type: 'M', source: 'stakeholder_nodes', compact: (o) => renderList(o.stakeholder_nodes, n => `${n.id}. ${n.name || ''} — ${n.role || ''}`) },
+      { no: 16, label: 'Investasi (Tahun)', type: 'M', source: 'investment_nodes', compact: (o) => renderList(o.investment_nodes, n => `${n.id}. ${n.year || '-'}`) },
+      { no: 17, label: 'Investasi (Bentuk)', type: 'M', source: 'investment_nodes', compact: (o) => renderList(o.investment_nodes, n => `${n.id}. ${n.form || ''}`) },
+      { no: 18, label: 'Investasi (Nominal)', type: 'M', source: 'investment_nodes', compact: (o) => renderList(o.investment_nodes, n => `${n.id}. ${formatCurrency(n.amount_idr)}`) },
+      { no: 19, label: 'Penerima Manfaat (Jenis)', type: 'M', source: 'beneficiary_nodes', compact: (o) => renderList(o.beneficiary_nodes, n => `${n.id}. ${n.name || ''} (${n.type || ''})`) },
+      { no: 20, label: 'Penerima Manfaat (Jumlah)', type: 'M', source: 'beneficiary_nodes', compact: (o) => renderList(o.beneficiary_nodes, n => `${n.id}. ${n.count == null ? 'belum tersedia' : `${n.count} ${n.unit || ''}`}`) },
+      { no: 21, label: 'Penerima Manfaat (Keterangan)', type: 'M', source: 'beneficiary_nodes', compact: (o) => renderList(o.beneficiary_nodes, n => `${n.id}. ${n.description || ''}`) },
+      { no: 22, label: 'Output', type: 'M', source: 'output_nodes', compact: (o) => renderList(o.output_nodes, n => `${n.id}. ${[n.label, n.description].filter(Boolean).join(' — ')}`) },
+      { no: 23, label: 'Kondisi Sebelum Program (Ekonomi)', type: 'M', source: 'baseline_nodes', compact: (o) => baselineCompact(o, 'economic') },
+      { no: 24, label: 'Kondisi Sebelum Program (Sosial)', type: 'M', source: 'baseline_nodes', compact: (o) => baselineCompact(o, 'social') },
+      { no: 25, label: 'Kondisi Sebelum Program (Lingkungan)', type: 'M', source: 'baseline_nodes', compact: (o) => baselineCompact(o, 'environmental') },
+      { no: 26, label: 'Kondisi Sebelum Program (Well-Being)', type: 'M', source: 'baseline_nodes', compact: (o) => baselineCompact(o, 'well_being') },
+      { no: 27, label: 'Outcome (Ekonomi)', type: 'M', source: 'outcome_nodes', compact: (o) => outcomeCompact(o, 'economic') },
+      { no: 28, label: 'Outcome (Sosial)', type: 'M', source: 'outcome_nodes', compact: (o) => outcomeCompact(o, 'social') },
+      { no: 29, label: 'Outcome (Lingkungan)', type: 'M', source: 'outcome_nodes', compact: (o) => outcomeCompact(o, 'environmental') },
+      { no: 30, label: 'Outcome (Well-Being)', type: 'M', source: 'outcome_nodes', compact: (o) => outcomeCompact(o, 'well_being') },
+      { no: 31, label: 'Indikator Kuantitatif (Ekonomi)', type: 'M', source: 'indicator_nodes', compact: (o) => indicatorCompact(o, 'economic', 'indicator') },
+      { no: 32, label: 'Indikator Kuantitatif (Sosial)', type: 'M', source: 'indicator_nodes', compact: (o) => indicatorCompact(o, 'social', 'indicator') },
+      { no: 33, label: 'Indikator Kuantitatif (Lingkungan)', type: 'M', source: 'indicator_nodes', compact: (o) => indicatorCompact(o, 'environmental', 'indicator') },
+      { no: 34, label: 'Indikator Kuantitatif (Well-Being)', type: 'M', source: 'indicator_nodes', compact: (o) => indicatorCompact(o, 'well_being', 'indicator') },
+      { no: 35, label: 'Satuan Indikator', type: 'M', source: 'indicator_nodes', compact: (o) => renderList(o.indicator_nodes, n => `${n.id}. ${n.unit || 'belum tersedia'}`) },
+      { no: 36, label: 'Nilai Indikator / Jumlah Penerima Outcome', type: 'M', source: 'indicator_nodes', compact: indicatorValueCompact },
+      { no: 37, label: 'Metode Pengukuran / Sumber Data', type: 'M', source: 'indicator_nodes', compact: (o) => renderList(o.indicator_nodes, n => `${n.id}. ${n.measurement_method || 'belum tersedia'}`) },
+      { no: 38, label: 'Monetisasi Sebelum Fiksasi (Aspek)', type: 'M', source: 'monetisation_pre_fix_nodes', compact: (o) => renderList(o.monetisation_pre_fix_nodes, n => `${n.id}. ${n.aspect || ''}`) },
+      { no: 39, label: 'Proksi / Dasar Monetisasi', type: 'M', source: 'monetisation_pre_fix_nodes', compact: (o) => renderList(o.monetisation_pre_fix_nodes, n => `${n.id}. ${n.proxy_basis || 'belum tersedia'}`) },
+      { no: 40, label: 'Justifikasi Akademik Proksi', type: 'M', source: 'monetisation_pre_fix_nodes', compact: (o) => renderList(o.monetisation_pre_fix_nodes, n => `${n.id}. ${n.proxy_justification || 'belum tersedia'}`) },
+      { no: 41, label: 'Monetisasi Sebelum Fiksasi (2022)', type: 'M', source: 'monetisation_pre_fix_nodes', compact: (o) => monetisationYearCompact(o, 'value_2022') },
+      { no: 42, label: 'Monetisasi Sebelum Fiksasi (2023)', type: 'M', source: 'monetisation_pre_fix_nodes', compact: (o) => monetisationYearCompact(o, 'value_2023') },
+      { no: 43, label: 'Monetisasi Sebelum Fiksasi (2024)', type: 'M', source: 'monetisation_pre_fix_nodes', compact: (o) => monetisationYearCompact(o, 'value_2024') },
+      { no: 44, label: 'Justifikasi Akademik Deadweight', type: 'M', source: 'impact_adjustment_nodes', compact: (o) => adjustmentJustificationCompact(o, 'deadweight') },
+      { no: 45, label: 'Nilai Deadweight', type: 'M', source: 'impact_adjustment_nodes', compact: (o) => adjustmentValueCompact(o, 'deadweight') },
+      { no: 46, label: 'Justifikasi Akademik Displacement', type: 'M', source: 'impact_adjustment_nodes', compact: (o) => adjustmentJustificationCompact(o, 'displacement') },
+      { no: 47, label: 'Nilai Displacement', type: 'M', source: 'impact_adjustment_nodes', compact: (o) => adjustmentValueCompact(o, 'displacement') },
+      { no: 48, label: 'Justifikasi Akademik Attribution', type: 'M', source: 'impact_adjustment_nodes', compact: (o) => adjustmentJustificationCompact(o, 'attribution') },
+      { no: 49, label: 'Nilai Attribution', type: 'M', source: 'impact_adjustment_nodes', compact: (o) => adjustmentValueCompact(o, 'attribution') },
+      { no: 50, label: 'Justifikasi Akademik Drop-off', type: 'M', source: 'impact_adjustment_nodes', compact: (o) => adjustmentJustificationCompact(o, 'drop_off') },
+      { no: 51, label: 'Nilai Drop-off', type: 'M', source: 'impact_adjustment_nodes', compact: (o) => adjustmentValueCompact(o, 'drop_off') },
+      { no: 52, label: 'Nilai Monetisasi Setelah Fiksasi (Aspek)', type: 'M', source: 'final_value_nodes', compact: (o) => renderList(o.final_value_nodes, n => `${n.id}. ${n.aspect || ''}`) },
+      { no: 53, label: 'Nilai Monetisasi Setelah Fiksasi (2022)', type: 'M', source: 'final_value_nodes', compact: (o) => finalValueYearCompact(o, 'value_2022') },
+      { no: 54, label: 'Nilai Monetisasi Setelah Fiksasi (2023)', type: 'M', source: 'final_value_nodes', compact: (o) => finalValueYearCompact(o, 'value_2023') },
+      { no: 55, label: 'Nilai Monetisasi Setelah Fiksasi (2024)', type: 'M', source: 'final_value_nodes', compact: (o) => finalValueYearCompact(o, 'value_2024') },
+      { no: 56, label: 'Informasi Umum / Catatan Asumsi', type: 'M', source: 'notes', compact: (o) => renderList(o.notes, n => `${n.id}. ${n.type || ''} — ${n.text || ''}`) },
+    ];
 
-createApp({
-    data() {
-        return {
-            // Template dasar sesuai schema anda
-            ontology: {
-                ontology_meta: { ontology_id: "SROI-2026-001", version: "1.0", status: "draft", source_of_truth: true },
-                identity: { cdo_name: "", unit_kerja: "", lokasi_pelaksanaan: "", program: "", sub_program: "", row_context_label: "" },
-                problem_nodes: [],
-                activity_nodes: [],
-                stakeholder_nodes: [],
-                investment_nodes: [],
-                beneficiary_nodes: [],
-                output_nodes: [],
-                baseline_nodes: [],
-                outcome_nodes: [],
-                indicator_nodes: [],
-                monetisation_pre_fix_nodes: [],
-                impact_adjustment_nodes: [],
-                final_value_nodes: [],
-                notes: [],
-                relation_index: {
-                    problem_to_activity: {},
-                    activity_to_output: {},
-                    output_to_outcome: {},
-                    outcome_to_indicator: {},
-                    indicator_to_monetisation: {},
-                    monetisation_to_final_value: {}
-                },
-                column_render_bindings: {},
-                render_config: { compact_separator: "\n", null_display: "belum tersedia", currency_locale: "id-ID" }
-            }
-        }
-    },
-    mounted() {
-        const saved = localStorage.getItem('sroi_ontology_data');
-        if (saved) {
-            this.ontology = JSON.parse(saved);
-        }
-    },
-    watch: {
-        ontology: {
-            handler(val) {
-                localStorage.setItem('sroi_ontology_data', JSON.stringify(val));
-            },
-            deep: true
-        }
-    },
-    methods: {
-        addNode(collection, prefix) {
-            const newId = `${prefix}${this.ontology[collection].length + 1}`;
-            let newNode = { id: newId, label: "", description: "" };
-            
-            // Logika spesifik per tipe jika diperlukan
-            if (collection === 'problem_nodes') newNode.dimension = 'social';
-            
-            this.ontology[collection].push(newNode);
+    const GROUPS = {
+      'Identitas': [1,2,3,4,5,6],
+      'Framing Masalah': [7,8,9],
+      'Intervensi': [10,11,12,13,14,15,16,17,18,19,20,21,22],
+      'Baseline': [23,24,25,26],
+      'Outcome': [27,28,29,30],
+      'Measurement': [31,32,33,34,35,36,37],
+      'Monetisasi Sebelum Fiksasi': [38,39,40,41,42,43],
+      'Impact Adjustment': [44,45,46,47,48,49,50,51],
+      'Nilai Final': [52,53,54,55],
+      'Catatan': [56]
+    };
+
+    const iconMap = { subprogram:'🧩', investasi:'💰', manfaat:'👥', outcome:'🎯', sroi:'∑' };
+    const STORAGE_KEY = 'tjsl_ontology_records_v2';
+    let records = [];
+    let selectedId = null;
+    let editingId = null;
+    let query = '';
+
+    const safeId = () => (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : `id_${Date.now()}_${Math.random().toString(36).slice(2,8)}`;
+    const renderList = (arr, mapper) => (arr && arr.length ? arr.map(mapper).filter(Boolean).join('\n') : 'belum tersedia');
+    const toNumber = (v) => {
+      if (typeof v === 'number') return Number.isFinite(v) ? v : 0;
+      if (v == null || v === '') return 0;
+      const n = parseFloat(String(v).replace(/[^0-9.-]/g,''));
+      return Number.isFinite(n) ? n : 0;
+    };
+    const formatNumber = (v) => new Intl.NumberFormat('id-ID').format(toNumber(v));
+    const formatCurrency = (v) => (v == null || v === '' || !toNumber(v)) ? 'belum tersedia' : `Rp${formatNumber(v)}`;
+    const escapeHtml = (value) => String(value ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;');
+    const clone = (obj) => window.structuredClone ? structuredClone(obj) : JSON.parse(JSON.stringify(obj));
+
+    function emptyOntology() {
+      return {
+        ontology_meta: {
+          ontology_id: '', version: '1.0', status: 'draft', source_of_truth: true,
+          render_strategy: 'multi_node_rendered_in_one_field', unit_of_analysis: 'sub_program', notes: []
         },
-        deleteNode(collection, index) {
-            if (confirm('Hapus node ini?')) {
-                this.ontology[collection].splice(index, 1);
-            }
-        },
-        exportJSON() {
-            const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(this.ontology, null, 2));
-            const downloadAnchorNode = document.createElement('a');
-            downloadAnchorNode.setAttribute("href", dataStr);
-            downloadAnchorNode.setAttribute("download", `ontology_${this.ontology.ontology_meta.ontology_id}.json`);
-            document.body.appendChild(downloadAnchorNode);
-            downloadAnchorNode.click();
-            downloadAnchorNode.remove();
-        },
-        resetData() {
-            if (confirm('Hapus semua data dan reset ke template?')) {
-                localStorage.removeItem('sroi_ontology_data');
-                location.reload();
-            }
-        }
+        identity: { cdo_name:'', unit_kerja:'', lokasi_pelaksanaan:'', program:'', sub_program:'', row_context_label:'' },
+        problem_nodes: [], activity_nodes: [], stakeholder_nodes: [], investment_nodes: [], beneficiary_nodes: [], output_nodes: [], baseline_nodes: [], outcome_nodes: [], indicator_nodes: [], monetisation_pre_fix_nodes: [], impact_adjustment_nodes: [], final_value_nodes: [], notes: [],
+        relation_index: { problem_to_activity:{}, activity_to_output:{}, output_to_outcome:{}, outcome_to_indicator:{}, indicator_to_monetisation:{}, monetisation_to_final_value:{} },
+        column_render_bindings: {},
+        render_config: { compact_separator:'\n', compact_prefix_with_node_id:true, rich_ui_mode:'stacked_cards', null_display:'belum tersedia', empty_array_display:'-', currency_locale:'id-ID', currency_prefix:'Rp', year_priority_for_compact_numeric:['2024','2023','2022'] }
+      };
     }
-}).mount('#app')
-</script>
-</body>
+
+    function emptyRecord() {
+      return { id: safeId(), title:'', created_at:new Date().toISOString(), updated_at:new Date().toISOString(), ontology: emptyOntology() };
+    }
+
+    function seedRecord() {
+      const rec = emptyRecord();
+      rec.title = 'Contoh – Enduro Home Service';
+      rec.ontology = {
+        ontology_meta: {
+          ontology_id: 'ONT_EHS_001', version: '1.0', status: 'draft_test_case', source_of_truth: true,
+          render_strategy: 'multi_node_rendered_in_one_field', unit_of_analysis: 'sub_program',
+          notes: ['Ontology ini adalah source of truth untuk sub-program Enduro Home Service.']
+        },
+        identity: {
+          cdo_name: '', unit_kerja: 'PT Pertamina Lubricants', lokasi_pelaksanaan: '',
+          program: 'TJSL CSV PT Pertamina Lubricants', sub_program: 'Enduro Home Service',
+          row_context_label: 'Penguatan kompetensi siswa SMK melalui pelatihan teknis, model layanan home service, dan literasi produk Enduro'
+        },
+        problem_nodes: [
+          { id:'P1', label:'kebutuhan penguatan keterampilan praktis siswa SMK agar lebih aplikatif terhadap konteks layanan nyata', dimension:'economic', problem_type:'normative_operational_gap', description:'Capaian Pembelajaran Teknik Sepeda Motor Fase F telah menargetkan peserta didik mampu mendiagnosis gangguan atau kerusakan dan melakukan tindakan perbaikan pada berbagai sistem sepeda motor. Namun target kompetensi normatif tersebut masih perlu diterjemahkan lebih jauh ke dalam pengalaman belajar yang benar-benar aplikatif terhadap kebutuhan layanan nyata di lapangan, sehingga penguatan keterampilan praktis yang dekat dengan situasi servis riil masih menjadi ruang penting untuk diperkuat.', normative_basis:['CP Teknik Sepeda Motor Fase F'], evidence_basis:[], tags:['skill_gap','technical_competency','vocational_relevance'] },
+          { id:'P2', label:'kebutuhan penguatan kesiapan kerja dan transisi sekolah-ke-dunia kerja atau usaha', dimension:'economic', problem_type:'school_to_work_transition_gap', description:'Inpres No. 9 Tahun 2016 menegaskan revitalisasi SMK untuk meningkatkan kualitas dan daya saing sumber daya manusia Indonesia, sedangkan Perpres No. 68 Tahun 2022 memperluas agenda tersebut ke revitalisasi pendidikan vokasi dan pelatihan vokasi agar lebih bermutu dan relevan dengan dunia kerja. Namun lulusan SMK masih menghadapi tantangan transisi menuju pekerjaan atau usaha mandiri, sehingga penguatan kesiapan kerja tetap relevan.', normative_basis:['Inpres No. 9 Tahun 2016','Perpres No. 68 Tahun 2022'], evidence_basis:['TPT lulusan SMK tinggi'], tags:['work_readiness','employability','transition_to_work'] }
+        ],
+        activity_nodes: [
+          { id:'A1', year:'', form:'pelatihan teknis', label:'pelatihan teknis perbaikan sepeda motor', description:'Pelatihan teknis perbaikan kendaraan ringan, khususnya sepeda motor, yang difokuskan pada penguatan kemampuan diagnosis gangguan atau kerusakan dan tindakan perbaikan pada berbagai sistem sepeda motor.', addresses_problem_ids:['P1','P2'], activity_type:'capacity_building' }
+        ],
+        stakeholder_nodes: [
+          { id:'S1', name:'PT Pertamina Lubricants', jenis:'perusahaan', role:'pelaksana program TJSL CSV, penyedia dukungan program, dan pemberi literasi produk Enduro', related_activity_ids:['A1'] },
+          { id:'S2', name:'Sekolah Menengah Kejuruan (SMK)', jenis:'satuan pendidikan vokasi', role:'mitra pelaksanaan program dan penyedia peserta didik', related_activity_ids:['A1'] }
+        ],
+        investment_nodes: [
+          { id:'INV1', year:'', form:'in_cash / pembiayaan pelatihan teknis', amount_idr:null, description:'Dukungan biaya untuk pelatihan teknis perbaikan kendaraan ringan, termasuk fasilitator, bahan ajar, alat praktik, dan kebutuhan pelaksanaan.', related_activity_ids:['A1'], addresses_problem_ids:['P1','P2'] }
+        ],
+        beneficiary_nodes: [
+          { id:'B1', name:'Siswa SMK', type:'direct', count:null, unit:'orang', description:'Peserta didik SMK program keahlian Teknik Sepeda Motor yang mengikuti program Enduro Home Service.', related_activity_ids:['A1'] }
+        ],
+        output_nodes: [
+          { id:'O1', label:'pelatihan teknis servis sepeda motor', description:'Siswa SMK memperoleh pelatihan teknis diagnosis dan perbaikan sepeda motor.', generated_by_activity_ids:['A1'], target_beneficiary_ids:['B1'] }
+        ],
+        baseline_nodes: [
+          { id:'BL1', dimension:'economic', description:'Sebelum program, siswa SMK belum banyak memiliki pengalaman layanan servis yang berorientasi pasar atau berpotensi menghasilkan pendapatan.', related_problem_ids:['P1','P2'], target_beneficiary_ids:['B1'] }
+        ],
+        outcome_nodes: [
+          { id:'OC1', dimension:'economic', label:'peningkatan kesiapan kerja dan potensi akses pendapatan', description:'Siswa SMK memiliki kesiapan yang lebih baik untuk memasuki dunia kerja pada sektor jasa servis kendaraan bermotor atau mengembangkan layanan servis secara mandiri.', generated_from_output_ids:['O1'], baseline_reference_ids:['BL1'], target_beneficiary_ids:['B1'] }
+        ],
+        indicator_nodes: [
+          { id:'I1', dimension:'economic', indicator:'jumlah siswa yang mampu melakukan servis sepeda motor secara mandiri setelah mengikuti program', unit:'orang', related_outcome_id:'OC1', measurement_method:'evaluasi praktik dan uji kompetensi', value_2022:null, value_2023:null, value_2024:null }
+        ],
+        monetisation_pre_fix_nodes: [
+          { id:'M1', aspect:'peningkatan keterampilan teknis servis sepeda motor', related_indicator_id:'I1', proxy_basis:'', proxy_justification:'', calculation_method:'jumlah penerima manfaat × nilai proksi keterampilan teknis', value_2022:null, value_2023:null, value_2024:null }
+        ],
+        impact_adjustment_nodes: [
+          { id:'DW1', type:'deadweight', justification_points:['Sebagian perubahan tetap mungkin terjadi melalui pembelajaran reguler SMK.','Namun komponen home service dan literasi produk Enduro tidak otomatis hadir dalam pembelajaran rutin.'], final_value:0.20 },
+          { id:'DS1', type:'displacement', justification_points:['Program berfokus pada penguatan kapasitas siswa.','Potensi penggeseran jasa servis lain relatif kecil.'], final_value:0.05 },
+          { id:'AT1', type:'attribution', justification_points:['Sekolah, guru, instruktur, dan motivasi siswa turut berkontribusi.'], final_value:0.30 },
+          { id:'DO1', type:'drop_off', justification_points:['Keterampilan dan rasa percaya diri dapat menurun tanpa praktik lanjutan.'], final_value:0.10 }
+        ],
+        final_value_nodes: [
+          { id:'FV1', aspect:'peningkatan keterampilan teknis servis sepeda motor', source_monetisation_id:'M1', adjustment_ids:['DW1','DS1','AT1','DO1'], formula_year_1:'gross_value * (1-deadweight) * (1-displacement) * (1-attribution)', formula_following_years:'previous_year_value * (1-drop_off)', value_2022:null, value_2023:null, value_2024:null }
+        ],
+        notes: [
+          { id:'N1', type:'framing_rule', text:'Permasalahan diformulasikan sebagai gap antara target normatif kurikulum/kebijakan vokasi dan kebutuhan operasional, transisi kerja, serta relevansi industri.' },
+          { id:'N2', type:'csv_logic', text:'Shared value muncul dari kombinasi peningkatan kompetensi siswa SMK, peningkatan kualitas layanan kepada masyarakat, dan penguatan literasi serta relevansi produk Enduro.' }
+        ],
+        relation_index: { problem_to_activity:{ P1:['A1'], P2:['A1'] }, activity_to_output:{ A1:['O1'] }, output_to_outcome:{ O1:['OC1'] }, outcome_to_indicator:{ OC1:['I1'] }, indicator_to_monetisation:{ I1:['M1'] }, monetisation_to_final_value:{ M1:['FV1'] } },
+        column_render_bindings: {},
+        render_config: { compact_separator:'\n', compact_prefix_with_node_id:true, rich_ui_mode:'stacked_cards', null_display:'belum tersedia', empty_array_display:'-', currency_locale:'id-ID', currency_prefix:'Rp', year_priority_for_compact_numeric:['2024','2023','2022'] }
+      };
+      return rec;
+    }
+
+    function getById(list, id) { return (list || []).find(item => item.id === id); }
+    function labelsFromProblemIds(ontology, ids) {
+      return (ids || []).map(id => {
+        const p = getById(ontology.problem_nodes, id);
+        return p ? `${id}. ${p.label}` : id;
+      });
+    }
+    function problemMainCompact(o) { return renderList(o.problem_nodes, n => `${n.id}. ${n.label || ''}`); }
+    function problemNodeCompact(o) { return renderList(o.problem_nodes, n => `${n.id}. ${n.problem_type || 'belum tersedia'} | ${(n.tags || []).join(', ') || 'belum tersedia'}`); }
+    function problemJustificationCompact(o) {
+      return renderList(o.problem_nodes, n => `${n.id}. ${n.description || ''}\nBasis normatif: ${(n.normative_basis || []).join('; ') || '-'}\nBasis evidensi: ${(n.evidence_basis || []).join('; ') || '-'}`);
+    }
+    function activityProblemCompact(o) {
+      return renderList(o.activity_nodes, n => `${n.id}. ${(labelsFromProblemIds(o, n.addresses_problem_ids) || []).join('; ') || 'belum tersedia'}`);
+    }
+    function baselineCompact(o, dim) { return renderList((o.baseline_nodes || []).filter(n => n.dimension === dim), n => `${n.id}. ${n.description || ''}`); }
+    function outcomeCompact(o, dim) { return renderList((o.outcome_nodes || []).filter(n => n.dimension === dim), n => `${n.id}. ${[n.label, n.description].filter(Boolean).join(' — ')}`); }
+    function indicatorCompact(o, dim, prop) { return renderList((o.indicator_nodes || []).filter(n => n.dimension === dim), n => `${n.id}. ${n[prop] || 'belum tersedia'}`); }
+    function indicatorValueCompact(o) {
+      return renderList(o.indicator_nodes, n => `${n.id}. ${n.value_2024 ?? n.value_2023 ?? n.value_2022 ?? 'belum tersedia'}`);
+    }
+    function monetisationYearCompact(o, yearKey) { return renderList(o.monetisation_pre_fix_nodes, n => `${n.id}. ${formatCurrency(n[yearKey])}`); }
+    function adjustmentJustificationCompact(o, type) {
+      return renderList((o.impact_adjustment_nodes || []).filter(n => n.type === type), n => `${n.id}. ${(n.justification_points || []).join(' | ') || 'belum tersedia'}`);
+    }
+    function adjustmentValueCompact(o, type) {
+      return renderList((o.impact_adjustment_nodes || []).filter(n => n.type === type), n => `${n.id}. ${n.final_value == null ? 'belum tersedia' : n.final_value}`);
+    }
+    function finalValueYearCompact(o, yearKey) { return renderList(o.final_value_nodes, n => `${n.id}. ${formatCurrency(n[yearKey])}`); }
+
+    function renderField(spec, ontology) {
+      if (spec.type === 'S') {
+        return getSingleValue(ontology, spec.source);
+      }
+      return spec.compact ? spec.compact(ontology) : 'belum tersedia';
+    }
+
+    function getSingleValue(obj, path) {
+      return path.split('.').reduce((acc, key) => acc && acc[key] !== undefined ? acc[key] : '', obj) || 'belum tersedia';
+    }
+
+    function loadRecords() {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) {
+        try { records = JSON.parse(raw); }
+        catch { records = [seedRecord()]; }
+      } else {
+        records = [seedRecord()];
+        persist();
+      }
+      selectedId = records[0]?.id || null;
+    }
+    function persist() { localStorage.setItem(STORAGE_KEY, JSON.stringify(records)); }
+    function getFilteredRecords() {
+      const q = query.trim().toLowerCase();
+      return records.filter(r => [r.title, r.ontology?.ontology_meta?.ontology_id, r.ontology?.identity?.program, r.ontology?.identity?.sub_program].join(' ').toLowerCase().includes(q));
+    }
+    function getSelectedRecord(filtered) { return filtered.find(r => r.id === selectedId) || filtered[0] || null; }
+
+    function calcStats() {
+      const totalSubPrograms = records.length;
+      const totalInvestment = records.reduce((sum, r) => sum + (r.ontology?.investment_nodes || []).reduce((a, n) => a + toNumber(n.amount_idr), 0), 0);
+      const totalBeneficiaries = records.reduce((sum, r) => sum + (r.ontology?.beneficiary_nodes || []).reduce((a, n) => a + toNumber(n.count), 0), 0);
+      const totalOutcomeValue = records.reduce((sum, r) => sum + (r.ontology?.final_value_nodes || []).reduce((a, n) => a + (toNumber(n.value_2024) || toNumber(n.value_2023) || toNumber(n.value_2022)), 0), 0);
+      const sroi = totalInvestment ? (totalOutcomeValue / totalInvestment) : 0;
+      return { totalSubPrograms, totalInvestment, totalBeneficiaries, totalOutcomeValue, sroi };
+    }
+
+    function renderStats() {
+      const s = calcStats();
+      const items = [
+        { title:'Jumlah Sub Program', value:formatNumber(s.totalSubPrograms), helper:'Total ontology/sub-program tersimpan', icon:iconMap.subprogram },
+        { title:'Total Investasi', value:formatCurrency(s.totalInvestment), helper:'Akumulasi investment_nodes.amount_idr', icon:iconMap.investasi },
+        { title:'Total Penerima Manfaat', value:formatNumber(s.totalBeneficiaries), helper:'Akumulasi beneficiary_nodes.count', icon:iconMap.manfaat },
+        { title:'Total Nilai Outcome', value:formatCurrency(s.totalOutcomeValue), helper:'Akumulasi final_value_nodes', icon:iconMap.outcome },
+        { title:'Nilai SROI', value:s.sroi ? `${s.sroi.toFixed(2)}x` : '0.00x', helper:'Total nilai outcome ÷ total investasi', icon:iconMap.sroi },
+      ];
+      document.getElementById('statsGrid').innerHTML = items.map(item => `<div class="stat-card"><div><div class="stat-title">${item.title}</div><div class="stat-value">${item.value}</div><div class="stat-helper">${item.helper}</div></div><div class="stat-icon">${item.icon}</div></div>`).join('');
+    }
+
+    function renderRecordList(filtered, selected) {
+      const root = document.getElementById('recordList');
+      if (!filtered.length) return root.innerHTML = `<div class="muted">Tidak ada data.</div>`;
+      root.innerHTML = filtered.map(r => `<div class="record-item ${selected?.id === r.id ? 'active' : ''}" data-id="${r.id}"><div style="font-weight:700;">${escapeHtml(r.title || r.ontology?.identity?.sub_program || 'Tanpa Judul')}</div><div class="meta">${escapeHtml(r.ontology?.identity?.program || '-')}</div><div style="margin-top:10px;"><span class="badge">${escapeHtml(r.ontology?.ontology_meta?.ontology_id || '-')}</span></div></div>`).join('');
+      root.querySelectorAll('.record-item').forEach(el => el.addEventListener('click', () => { selectedId = el.dataset.id; renderApp(); }));
+    }
+
+    function section(title, content, open=false) {
+      return `<details class="section" ${open ? 'open' : ''}><summary>${title}<span class="summary-arrow">›</span></summary><div class="section-content">${content}</div></details>`;
+    }
+    function infoBox(title, content) { return `<div class="info-box"><div class="box-title">${title}</div><div class="box-content">${escapeHtml(content || 'belum tersedia')}</div></div>`; }
+
+    function renderNodeCards(nodes, cfg) {
+      if (!nodes || !nodes.length) return `<div class="muted">belum tersedia</div>`;
+      return `<div class="node-stack">${nodes.map(n => `<div class="node-card"><div class="node-title">${escapeHtml(cfg.title(n))}</div><div class="box-content" style="margin-top:10px;">${escapeHtml(cfg.body(n))}</div>${cfg.meta ? `<div class="node-meta">${cfg.meta(n)}</div>` : ''}</div>`).join('')}</div>`;
+    }
+
+    function richProblemCards(o) {
+      return renderNodeCards(o.problem_nodes, {
+        title: n => `${n.id}. ${n.label || 'Tanpa Judul'}`,
+        body: n => `${n.description || 'belum tersedia'}\n\nBasis normatif: ${(n.normative_basis || []).join('; ') || '-'}\nBasis evidensi: ${(n.evidence_basis || []).join('; ') || '-'}`,
+        meta: n => `${n.dimension ? `<span class="badge">Dimensi: ${escapeHtml(n.dimension)}</span>` : ''}${n.problem_type ? `<span class="badge">Tipe: ${escapeHtml(n.problem_type)}</span>` : ''}${(n.tags || []).map(tag => `<span class="badge">${escapeHtml(tag)}</span>`).join('')}`
+      });
+    }
+
+    function richActivityCards(o) {
+      return renderNodeCards(o.activity_nodes, {
+        title: n => `${n.id}. ${n.label || 'Tanpa Judul'}`,
+        body: n => `${n.description || 'belum tersedia'}\n\nMasalah dijawab: ${(labelsFromProblemIds(o, n.addresses_problem_ids) || []).join('; ') || '-'}`,
+        meta: n => `${n.form ? `<span class="badge">Bentuk: ${escapeHtml(n.form)}</span>` : ''}${n.activity_type ? `<span class="badge">Tipe: ${escapeHtml(n.activity_type)}</span>` : ''}${n.year ? `<span class="badge">Tahun: ${escapeHtml(n.year)}</span>` : ''}`
+      });
+    }
+
+    function richOutcomeCards(o) {
+      return renderNodeCards(o.outcome_nodes, {
+        title: n => `${n.id}. ${n.label || 'Tanpa Judul'}`,
+        body: n => `${n.description || 'belum tersedia'}`,
+        meta: n => `${n.dimension ? `<span class="badge">Dimensi: ${escapeHtml(n.dimension)}</span>` : ''}`
+      });
+    }
+
+    function renderDetail(record) {
+      const root = document.getElementById('detailRoot');
+      if (!record) {
+        root.innerHTML = `<div class="card empty-state"><div><div style="font-size:20px;font-weight:700;color:var(--text);">Belum ada record dipilih</div><div style="margin-top:8px;" class="muted">Tambahkan ontology pertama Anda untuk mulai merender 56 kolom.</div></div></div>`;
+        return;
+      }
+      const o = record.ontology;
+      const tableSections = Object.entries(GROUPS).map(([group, nums]) => {
+        const rows = nums.map(no => {
+          const spec = COLUMN_SPEC.find(s => s.no === no);
+          return `<tr><td><strong>${spec.no}. ${escapeHtml(spec.label)}</strong></td><td>${escapeHtml(renderField(spec, o))}</td></tr>`;
+        }).join('');
+        return `<details class="table-group" ${['Identitas','Framing Masalah'].includes(group) ? 'open' : ''}><summary>${group}<span class="summary-arrow">›</span></summary><div style="overflow:auto;"><table><thead><tr><th style="width:340px;">Kolom</th><th>Render Compact</th></tr></thead><tbody>${rows}</tbody></table></div></details>`;
+      }).join('');
+
+      root.innerHTML = `
+        <div class="detail-actions">
+          <button class="btn" id="editBtn">Edit Ontology</button>
+          <button class="btn danger" id="deleteBtn">Hapus</button>
+        </div>
+        <div class="hero-card">
+          <h2>${escapeHtml(record.title || o.identity?.sub_program || 'Tanpa Judul')}</h2>
+          <div class="badges">
+            <span class="badge">Program: ${escapeHtml(o.identity?.program || '-')}</span>
+            <span class="badge">Sub-program: ${escapeHtml(o.identity?.sub_program || '-')}</span>
+            <span class="badge">Ontology ID: ${escapeHtml(o.ontology_meta?.ontology_id || '-')}</span>
+          </div>
+        </div>
+        <div class="section-stack">
+          ${section('Framing Permasalahan', `<div class="info-grid" style="margin-bottom:14px;">${infoBox('Program', o.identity?.program)}${infoBox('Sub-Program', o.identity?.sub_program)}</div>${richProblemCards(o)}`, true)}
+          ${section('Intervensi Program', richActivityCards(o), true)}
+          ${section('Outcome Program', richOutcomeCards(o), true)}
+          ${section('Struktur Ontology JSON', `<div class="json-box">${escapeHtml(JSON.stringify(o, null, 2))}</div>`)}
+        </div>
+        <div class="card" style="margin-top:14px;">
+          <div class="panel-head"><h3 class="panel-title">Tabel 56 Kolom (Rendered)</h3></div>
+          <div class="panel-body">${tableSections}</div>
+        </div>
+      `;
+      document.getElementById('editBtn').addEventListener('click', () => openOntologyModal(record.id));
+      document.getElementById('deleteBtn').addEventListener('click', () => deleteRecord(record.id));
+    }
+
+    function openOntologyModal(recordId = null) {
+      editingId = recordId;
+      const record = recordId ? records.find(r => r.id === recordId) : emptyRecord();
+      document.getElementById('modalTitle').textContent = recordId ? 'Edit Ontology' : 'Tambah Ontology';
+      document.getElementById('recordTitle').value = record.title || '';
+      document.getElementById('ontologyIdMirror').value = record.ontology?.ontology_meta?.ontology_id || '';
+      document.getElementById('ontologyText').value = JSON.stringify(record.ontology || emptyOntology(), null, 2);
+      document.getElementById('ontologyModal').classList.add('open');
+      setActiveTab('ontology');
+    }
+    function closeOntologyModal() { document.getElementById('ontologyModal').classList.remove('open'); editingId = null; }
+    function setActiveTab(tab) {
+      document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.toggle('active', btn.dataset.tab === tab));
+      document.getElementById('tab-ontology').classList.toggle('active', tab === 'ontology');
+      document.getElementById('tab-spec').classList.toggle('active', tab === 'spec');
+    }
+
+    function saveOntology() {
+      let ontology;
+      try { ontology = JSON.parse(document.getElementById('ontologyText').value || '{}'); }
+      catch { return alert('JSON ontology belum valid.'); }
+      let record = editingId ? records.find(r => r.id === editingId) : emptyRecord();
+      if (!record) record = emptyRecord();
+      record.title = document.getElementById('recordTitle').value.trim() || ontology?.identity?.sub_program || ontology?.ontology_meta?.ontology_id || 'Tanpa Judul';
+      record.ontology = ontology;
+      record.updated_at = new Date().toISOString();
+      const exists = records.some(r => r.id === record.id);
+      records = exists ? records.map(r => r.id === record.id ? record : r) : [record, ...records];
+      selectedId = record.id;
+      persist();
+      closeOntologyModal();
+      renderApp();
+    }
+
+    function deleteRecord(id) {
+      if (!confirm('Hapus ontology ini?')) return;
+      records = records.filter(r => r.id !== id);
+      if (selectedId === id) selectedId = records[0]?.id || null;
+      persist();
+      renderApp();
+    }
+
+    function exportJson() {
+      const blob = new Blob([JSON.stringify(records, null, 2)], { type:'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href = url; a.download = 'tjsl-ontology-records-v2.json'; a.click();
+      URL.revokeObjectURL(url);
+    }
+    function importJson(file) {
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        try {
+          const parsed = JSON.parse(e.target.result);
+          if (!Array.isArray(parsed)) throw new Error();
+          records = parsed;
+          selectedId = records[0]?.id || null;
+          persist(); renderApp();
+        } catch { alert('File JSON tidak valid.'); }
+      };
+      reader.readAsText(file);
+    }
+
+    function openSnippetModal() {
+      const record = records.find(r => r.id === selectedId);
+      if (!record) return alert('Pilih record terlebih dahulu.');
+      document.getElementById('snippetText').value = '';
+      document.getElementById('snippetPreview').innerHTML = '<div class="muted">Paste snippet JSON lalu klik Preview.</div>';
+      document.getElementById('snippetModal').classList.add('open');
+      document.getElementById('jsonMenu').classList.add('hidden');
+    }
+    function closeSnippetModal() { document.getElementById('snippetModal').classList.remove('open'); }
+
+    function detectSnippetCollection(snippet) {
+      const keys = ['problem_nodes','activity_nodes','stakeholder_nodes','investment_nodes','beneficiary_nodes','output_nodes','baseline_nodes','outcome_nodes','indicator_nodes','monetisation_pre_fix_nodes','impact_adjustment_nodes','final_value_nodes','notes'];
+      return keys.find(k => Array.isArray(snippet?.[k]));
+    }
+
+    function buildSnippetPreview(snippet, ontology) {
+      const collection = detectSnippetCollection(snippet);
+      if (!collection) return { error:'Snippet tidak memiliki collection node yang dikenali.' };
+      const merged = clone(ontology);
+      if (snippet.ontology_meta) merged.ontology_meta = { ...merged.ontology_meta, ...snippet.ontology_meta };
+      if (snippet.identity) merged.identity = { ...merged.identity, ...snippet.identity };
+      merged[collection] = snippet[collection];
+      const changedColumns = COLUMN_SPEC.filter(spec => spec.type === 'M' ? spec.source === collection : (spec.source.startsWith('identity.') && snippet.identity) || (spec.source.startsWith('ontology_meta.') && snippet.ontology_meta));
+      return {
+        collection,
+        changedColumns: changedColumns.map(spec => ({ no: spec.no, label: spec.label, current: renderField(spec, ontology), incoming: renderField(spec, merged) })),
+        mergedOntology: merged
+      };
+    }
+
+    function renderSnippetPreview(result) {
+      const root = document.getElementById('snippetPreview');
+      if (result?.error) return root.innerHTML = `<div class="muted">${escapeHtml(result.error)}</div>`;
+      if (!result?.changedColumns?.length) return root.innerHTML = `<div class="muted">Tidak ada kolom yang terpengaruh.</div>`;
+      root.innerHTML = `<div class="node-stack">${result.changedColumns.map(item => `<div class="node-card"><div class="node-title">${item.no}. ${escapeHtml(item.label)}</div><div class="node-meta" style="margin-top:8px;"><span class="badge">Current</span></div><div class="box-content" style="margin-top:8px;">${escapeHtml(item.current)}</div><div class="node-meta" style="margin-top:12px;"><span class="badge">Incoming</span></div><div class="box-content" style="margin-top:8px;">${escapeHtml(item.incoming)}</div></div>`).join('')}</div>`;
+    }
+
+    function applySnippet(mode) {
+      const record = records.find(r => r.id === selectedId);
+      if (!record) return alert('Pilih record terlebih dahulu.');
+      let snippet;
+      try { snippet = JSON.parse(document.getElementById('snippetText').value || '{}'); }
+      catch { return alert('JSON snippet belum valid.'); }
+      const collection = detectSnippetCollection(snippet);
+      if (!collection) return alert('Collection snippet tidak dikenali.');
+      const updated = clone(record);
+      if (snippet.ontology_meta) updated.ontology.ontology_meta = { ...updated.ontology.ontology_meta, ...snippet.ontology_meta };
+      if (snippet.identity) updated.ontology.identity = { ...updated.ontology.identity, ...snippet.identity };
+      const existing = Array.isArray(updated.ontology[collection]) ? updated.ontology[collection] : [];
+      const incoming = Array.isArray(snippet[collection]) ? snippet[collection] : [];
+      if (mode === 'replace') {
+        updated.ontology[collection] = incoming;
+      } else if (mode === 'append') {
+        updated.ontology[collection] = [...existing, ...incoming];
+      } else {
+        const map = new Map();
+        existing.forEach(n => map.set(n.id || JSON.stringify(n), n));
+        incoming.forEach(n => {
+          const key = n.id || JSON.stringify(n);
+          map.set(key, map.has(key) ? { ...map.get(key), ...n } : n);
+        });
+        updated.ontology[collection] = Array.from(map.values());
+      }
+      updated.updated_at = new Date().toISOString();
+      records = records.map(r => r.id === updated.id ? updated : r);
+      persist();
+      closeSnippetModal();
+      renderApp();
+    }
+
+    function renderApp() {
+      const filtered = getFilteredRecords();
+      const selected = getSelectedRecord(filtered);
+      if (!selectedId && selected) selectedId = selected.id;
+      renderStats();
+      renderRecordList(filtered, selected);
+      renderDetail(selected);
+    }
+
+    function bindEvents() {
+      document.getElementById('searchInput').addEventListener('input', e => { query = e.target.value; renderApp(); });
+      document.getElementById('addBtn').addEventListener('click', () => openOntologyModal());
+      document.getElementById('jsonMenuBtn').addEventListener('click', e => { e.stopPropagation(); document.getElementById('jsonMenu').classList.toggle('hidden'); });
+      document.getElementById('openSnippetBtn').addEventListener('click', openSnippetModal);
+      document.getElementById('exportBtn').addEventListener('click', exportJson);
+      document.getElementById('importInput').addEventListener('change', e => importJson(e.target.files?.[0]));
+      document.getElementById('closeModalBtn').addEventListener('click', closeOntologyModal);
+      document.getElementById('cancelBtn').addEventListener('click', closeOntologyModal);
+      document.getElementById('saveBtn').addEventListener('click', saveOntology);
+      document.querySelectorAll('.tab-btn').forEach(btn => btn.addEventListener('click', () => setActiveTab(btn.dataset.tab)));
+      document.getElementById('ontologyIdMirror').addEventListener('input', e => {
+        try {
+          const obj = JSON.parse(document.getElementById('ontologyText').value || '{}');
+          obj.ontology_meta = { ...(obj.ontology_meta || {}), ontology_id: e.target.value };
+          document.getElementById('ontologyText').value = JSON.stringify(obj, null, 2);
+        } catch {}
+      });
+      document.getElementById('ontologyModal').addEventListener('click', e => { if (e.target.id === 'ontologyModal') closeOntologyModal(); });
+      document.getElementById('closeSnippetModalBtn').addEventListener('click', closeSnippetModal);
+      document.getElementById('previewSnippetBtn').addEventListener('click', () => {
+        const record = records.find(r => r.id === selectedId);
+        if (!record) return alert('Pilih record terlebih dahulu.');
+        try {
+          const snippet = JSON.parse(document.getElementById('snippetText').value || '{}');
+          renderSnippetPreview(buildSnippetPreview(snippet, record.ontology));
+        } catch { alert('JSON snippet belum valid.'); }
+      });
+      document.getElementById('applyReplaceBtn').addEventListener('click', () => applySnippet('replace'));
+      document.getElementById('applyAppendBtn').addEventListener('click', () => applySnippet('append'));
+      document.getElementById('applyMergeBtn').addEventListener('click', () => applySnippet('merge'));
+      document.getElementById('snippetModal').addEventListener('click', e => { if (e.target.id === 'snippetModal') closeSnippetModal(); });
+      document.addEventListener('click', e => {
+        const menu = document.getElementById('jsonMenu');
+        const btn = document.getElementById('jsonMenuBtn');
+        if (menu && btn && !menu.contains(e.target) && !btn.contains(e.target)) menu.classList.add('hidden');
+      });
+    }
+
+    loadRecords();
+    bindEvents();
+    renderApp();
+  </script></body>
 </html>
