@@ -3,1125 +3,1050 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>SROI PTPL 2025</title>
+  <title>TJSL Ontology CRUD</title>
   <style>
     :root {
-      --bg: #f1f5f9;
-      --card: #ffffff;
-      --muted: #64748b;
-      --text: #0f172a;
-      --border: #e2e8f0;
-      --soft: #f8fafc;
-      --primary: #0f172a;
-      --primary-soft: #e2e8f0;
-      --danger: #b91c1c;
-      --danger-soft: #fee2e2;
-      --success-soft: #ecfeff;
-      --radius: 22px;
-      --shadow: 0 1px 2px rgba(15, 23, 42, 0.06), 0 8px 24px rgba(15, 23, 42, 0.04);
+      --bg: #0b1220;
+      --panel: #131c31;
+      --panel-2: #18233d;
+      --panel-3: #223152;
+      --text: #eef4ff;
+      --muted: #a9b8d6;
+      --accent: #60a5fa;
+      --accent-2: #34d399;
+      --danger: #f87171;
+      --warn: #fbbf24;
+      --border: #2f436c;
+      --chip: #1f2d4b;
+      --shadow: 0 10px 30px rgba(0,0,0,.25);
+      --radius: 16px;
     }
-
     * { box-sizing: border-box; }
     body {
       margin: 0;
-      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+      background: linear-gradient(180deg, #07101c, #0d1730 30%, #0b1220);
       color: var(--text);
-      background: var(--bg);
+      min-height: 100vh;
     }
-    button, input, textarea, select {
+    .app {
+      display: grid;
+      grid-template-columns: 330px 1fr;
+      min-height: 100vh;
+    }
+    aside {
+      border-right: 1px solid var(--border);
+      background: rgba(8, 14, 28, .6);
+      backdrop-filter: blur(10px);
+      padding: 18px;
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      overflow: auto;
+    }
+    main {
+      padding: 18px;
+      overflow: auto;
+    }
+    .brand {
+      background: linear-gradient(135deg, #132141, #1a2d58);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 16px;
+      box-shadow: var(--shadow);
+      margin-bottom: 16px;
+    }
+    .brand h1 { margin: 0 0 8px; font-size: 20px; }
+    .brand p { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.4; }
+    .toolbar, .row-actions, .tabbar, .snippet-controls, .json-actions {
+      display: flex; gap: 8px; flex-wrap: wrap;
+    }
+    .toolbar { margin-bottom: 14px; }
+    button, select, input, textarea {
       font: inherit;
     }
-    .container {
-      max-width: 1440px;
-      margin: 0 auto;
-      padding: 24px;
-    }
-    .topbar {
-      display: flex;
-      justify-content: space-between;
-      align-items: flex-start;
-      gap: 16px;
-      margin-bottom: 24px;
-      flex-wrap: wrap;
-    }
-    h1 {
-      margin: 0;
-      font-size: 32px;
-      line-height: 1.15;
-    }
-    .subtitle {
-      margin: 6px 0 0;
-      color: var(--muted);
-    }
-    .actions {
-      display: flex;
-      gap: 10px;
-      flex-wrap: wrap;
-    }
-    .btn {
+    button {
       border: 1px solid var(--border);
-      background: var(--card);
+      background: var(--panel-2);
       color: var(--text);
-      padding: 12px 16px;
-      border-radius: 16px;
+      padding: 9px 12px;
+      border-radius: 12px;
       cursor: pointer;
-      transition: .2s ease;
-      font-weight: 600;
+      transition: .18s ease;
     }
-    .btn:hover { transform: translateY(-1px); box-shadow: var(--shadow); }
-    .btn.primary {
-      background: var(--primary);
-      color: white;
-      border-color: var(--primary);
-    }
-    .btn.danger {
-      background: var(--danger);
-      color: white;
-      border-color: var(--danger);
-    }
-    .stats-grid {
-      display: grid;
-      grid-template-columns: repeat(5, minmax(0, 1fr));
-      gap: 16px;
-      margin-bottom: 24px;
-    }
-    .stat-card, .card {
-      background: var(--card);
-      border: 1px solid var(--border);
-      border-radius: 28px;
-      box-shadow: var(--shadow);
-    }
-    .stat-card {
-      padding: 20px;
-      display: flex;
-      justify-content: space-between;
-      align-items: flex-start;
-      gap: 12px;
-      min-height: 140px;
-    }
-    .stat-title {
-      color: var(--muted);
-      font-size: 14px;
-      margin-bottom: 10px;
-    }
-    .stat-value {
-      font-size: 34px;
-      font-weight: 800;
-      line-height: 1.05;
-      word-break: break-word;
-    }
-    .stat-helper {
-      margin-top: 8px;
-      color: #94a3b8;
-      font-size: 12px;
-      line-height: 1.45;
-    }
-    .stat-icon {
-      min-width: 64px;
-      min-height: 64px;
-      display: grid;
-      place-items: center;
-      background: #f1f5f9;
-      border-radius: 22px;
-      font-size: 28px;
-    }
-    .main-grid {
-      display: grid;
-      grid-template-columns: 340px 1fr;
-      gap: 24px;
-      align-items: start;
-    }
-    .panel-title {
-      margin: 0 0 4px;
-      font-size: 20px;
-    }
-    .panel-head {
-      padding: 20px 20px 0;
-    }
-    .panel-body {
-      padding: 20px;
-    }
-    .search-wrap { position: relative; margin-top: 12px; }
-    .search-wrap input {
+    button:hover { transform: translateY(-1px); background: var(--panel-3); }
+    button.primary { background: linear-gradient(135deg, #1d4ed8, #2563eb); border-color: #3b82f6; }
+    button.success { background: linear-gradient(135deg, #0f766e, #10b981); border-color: #34d399; }
+    button.warn { background: linear-gradient(135deg, #92400e, #d97706); border-color: #f59e0b; }
+    button.danger { background: linear-gradient(135deg, #991b1b, #dc2626); border-color: #f87171; }
+    button.ghost { background: transparent; }
+    .search {
       width: 100%;
-      padding: 12px 14px 12px 40px;
-      border-radius: 16px;
+      background: var(--panel);
+      color: var(--text);
       border: 1px solid var(--border);
-      background: var(--soft);
-    }
-    .search-icon {
-      position: absolute;
-      left: 14px;
-      top: 50%;
-      transform: translateY(-50%);
-      color: #94a3b8;
-    }
-    .record-list {
-      display: flex;
-      flex-direction: column;
-      gap: 12px;
-      max-height: calc(100vh - 300px);
-      overflow: auto;
-      padding-right: 6px;
-    }
-    .record-item {
-      border: 1px solid var(--border);
-      border-radius: 22px;
-      background: white;
-      padding: 16px;
-      cursor: pointer;
-      transition: .2s ease;
-    }
-    .record-item:hover { background: var(--soft); }
-    .record-item.active {
-      background: var(--primary);
-      color: white;
-      border-color: var(--primary);
-    }
-    .record-item .meta {
-      margin-top: 8px;
-      font-size: 12px;
-      opacity: .8;
-    }
-    .badge {
-      display: inline-flex;
-      align-items: center;
-      padding: 6px 10px;
-      border-radius: 999px;
-      border: 1px solid var(--border);
-      font-size: 12px;
-      background: white;
-      gap: 6px;
-    }
-    .record-item.active .badge {
-      background: rgba(255,255,255,.12);
-      border-color: rgba(255,255,255,.16);
-      color: white;
-    }
-    .detail-actions {
-      display: flex;
-      justify-content: flex-end;
-      gap: 10px;
+      border-radius: 12px;
+      padding: 10px 12px;
       margin-bottom: 12px;
-      flex-wrap: wrap;
     }
-    .hero-card {
-      padding: 22px;
-      background: linear-gradient(135deg, #f8fafc 0%, #ffffff 100%);
+    .row-list { display: flex; flex-direction: column; gap: 10px; }
+    .row-card {
+      background: var(--panel);
       border: 1px solid var(--border);
-      border-radius: 28px;
+      border-radius: 16px;
+      padding: 12px;
+      cursor: pointer;
+    }
+    .row-card.active { outline: 2px solid var(--accent); background: #142241; }
+    .row-card h3 { margin: 0 0 6px; font-size: 15px; }
+    .row-card p { margin: 0 0 10px; color: var(--muted); font-size: 12px; }
+    .chips { display: flex; gap: 6px; flex-wrap: wrap; }
+    .chip {
+      background: var(--chip);
+      border: 1px solid var(--border);
+      padding: 4px 8px;
+      border-radius: 999px;
+      font-size: 11px;
+      color: var(--muted);
+    }
+    .panel {
+      background: rgba(19, 28, 49, .75);
+      border: 1px solid var(--border);
+      border-radius: 20px;
       box-shadow: var(--shadow);
+      overflow: hidden;
     }
-    .hero-card h2 {
-      margin: 0 0 12px;
-      font-size: 30px;
+    .header {
+      padding: 18px;
+      border-bottom: 1px solid var(--border);
+      background: linear-gradient(135deg, rgba(29, 78, 216, .18), rgba(52, 211, 153, .10));
     }
-    .badges { display: flex; gap: 8px; flex-wrap: wrap; }
-    .section-stack { display: flex; flex-direction: column; gap: 14px; margin-top: 14px; }
+    .header h2 { margin: 0 0 8px; }
+    .header p { margin: 0; color: var(--muted); }
+    .tabbar { padding: 12px 18px; border-bottom: 1px solid var(--border); }
+    .tabbar button.active { background: var(--panel-3); border-color: var(--accent); }
+    .tab-content { padding: 18px; }
+    .grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+    .grid-3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+    .field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
+    .field label { color: var(--muted); font-size: 12px; }
+    .field input, .field textarea, .field select {
+      background: #0f1729;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 10px 12px;
+      color: var(--text);
+      width: 100%;
+    }
+    .field textarea { min-height: 100px; resize: vertical; }
     details.section {
-      background: white;
       border: 1px solid var(--border);
-      border-radius: 24px;
-      box-shadow: var(--shadow);
+      border-radius: 16px;
+      background: var(--panel);
+      margin-bottom: 12px;
       overflow: hidden;
     }
     details.section > summary {
       list-style: none;
       cursor: pointer;
-      padding: 18px 22px;
-      font-weight: 700;
-      font-size: 18px;
+      padding: 14px 16px;
+      background: rgba(255,255,255,.02);
       display: flex;
       align-items: center;
       justify-content: space-between;
+      gap: 12px;
+      font-weight: 600;
     }
     details.section > summary::-webkit-details-marker { display: none; }
-    .summary-arrow { transition: transform .2s ease; }
-    details[open] .summary-arrow { transform: rotate(90deg); }
-    .section-content { padding: 0 22px 22px; }
-    .info-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; }
-    .flow-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
-    .info-box, .flow-box, .problem-box {
-      background: var(--soft);
+    .section-body { padding: 16px; border-top: 1px solid var(--border); }
+    .item-card {
+      background: #0f1729;
       border: 1px solid var(--border);
-      border-radius: 22px;
-      padding: 16px;
-      min-height: 120px;
-    }
-    .flow-box { background: white; min-height: 170px; }
-    .box-title {
-      font-size: 13px;
-      color: var(--muted);
-      margin-bottom: 10px;
-      font-weight: 600;
-    }
-    .box-content {
-      font-size: 14px;
-      line-height: 1.7;
-      white-space: pre-wrap;
-    }
-    .problem-stack { display: flex; flex-direction: column; gap: 14px; }
-    .problem-box {
-      background: white;
-    }
-    .problem-title {
-      font-weight: 700;
-      line-height: 1.6;
-    }
-    .problem-meta { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
-    .json-box {
-      background: #020617;
-      color: #e2e8f0;
-      border-radius: 24px;
-      padding: 18px;
-      overflow: auto;
-      font-size: 12px;
-      line-height: 1.6;
-      white-space: pre-wrap;
-    }
-    .table-card { margin-top: 14px; }
-    .table-card .panel-head { padding-bottom: 16px; }
-    .accordion-stack { display: flex; flex-direction: column; gap: 12px; }
-    details.table-group {
-      background: white;
-      border: 1px solid var(--border);
-      border-radius: 22px;
-      overflow: hidden;
-    }
-    details.table-group > summary {
-      list-style: none;
-      cursor: pointer;
-      padding: 16px 18px;
-      font-weight: 700;
-      display: flex;
-      justify-content: space-between;
-    }
-    details.table-group > summary::-webkit-details-marker { display: none; }
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      font-size: 14px;
-    }
-    th, td {
-      text-align: left;
-      vertical-align: top;
-      padding: 12px 14px;
-      border-top: 1px solid var(--border);
-    }
-    th { background: var(--soft); }
-    .muted { color: var(--muted); }
-    .empty-state {
-      display: grid;
-      place-items: center;
-      min-height: 400px;
-      text-align: center;
-      color: var(--muted);
-    }
-    .modal {
-      position: fixed;
-      inset: 0;
-      background: rgba(15, 23, 42, 0.45);
-      display: none;
-      align-items: center;
-      justify-content: center;
-      padding: 20px;
-      z-index: 50;
-    }
-    .modal.open { display: flex; }
-    .modal-card {
-      width: min(1240px, 100%);
-      height: min(90vh, 960px);
-      background: white;
-      border-radius: 28px;
-      box-shadow: var(--shadow);
-      display: flex;
-      flex-direction: column;
-      overflow: hidden;
-    }
-    .modal-head {
-      padding: 20px 24px 0;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      gap: 12px;
-    }
-    .modal-tabs {
-      display: flex;
-      gap: 8px;
-      padding: 16px 24px 0;
-    }
-    .tab-btn {
-      padding: 10px 14px;
       border-radius: 14px;
+      padding: 12px;
+      margin-bottom: 10px;
+    }
+    .item-card h4 { margin: 0 0 10px; font-size: 14px; display: flex; justify-content: space-between; gap: 10px; align-items: center; }
+    .small { font-size: 12px; color: var(--muted); }
+    .muted { color: var(--muted); }
+    .statbar { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 10px; margin-top: 10px; }
+    .stat {
+      background: rgba(255,255,255,.03);
       border: 1px solid var(--border);
-      background: white;
-      cursor: pointer;
-      font-weight: 600;
+      border-radius: 14px;
+      padding: 12px;
     }
-    .tab-btn.active {
-      background: var(--primary);
-      color: white;
-      border-color: var(--primary);
-    }
-    .modal-body {
-      flex: 1;
-      overflow: hidden;
-      padding: 16px 24px 0;
-    }
-    .tab-panel {
-      display: none;
-      height: 100%;
-    }
-    .tab-panel.active { display: block; }
-    .scroll-pane {
-      height: 100%;
-      overflow: auto;
-      padding-right: 8px;
-    }
-    .form-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; }
-    .field {
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-    }
-    .field label {
-      font-size: 14px;
-      font-weight: 600;
-    }
-    .field input, .field textarea {
-      width: 100%;
+    .stat .value { font-size: 20px; font-weight: 700; }
+    .divider { height: 1px; background: var(--border); margin: 14px 0; }
+    .pitch-card {
+      background: #0f1729;
       border: 1px solid var(--border);
-      background: white;
       border-radius: 16px;
-      padding: 12px 14px;
+      padding: 14px;
+      margin-bottom: 12px;
     }
-    .field textarea { min-height: 110px; resize: vertical; }
-    .group-box {
+    .pitch-card h3 { margin: 0 0 10px; }
+    .codebox {
+      width: 100%; min-height: 240px;
+      background: #07101c;
       border: 1px solid var(--border);
-      border-radius: 22px;
-      padding: 0 16px;
-      margin-top: 14px;
-      background: white;
+      color: #d9e8ff;
+      border-radius: 14px;
+      padding: 12px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      white-space: pre-wrap;
     }
-    .group-box summary {
-      list-style: none;
-      cursor: pointer;
-      padding: 16px 0;
-      font-weight: 700;
-    }
-    .group-box summary::-webkit-details-marker { display: none; }
-    .group-content { padding-bottom: 16px; }
-    .ontology-layout {
-      display: grid;
-      grid-template-columns: 1fr 320px;
-      gap: 16px;
-      height: 100%;
-    }
-    .mono {
-      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    .preview {
+      background: #0f1729;
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 12px;
+      margin-top: 10px;
+      white-space: pre-wrap;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
       font-size: 12px;
-      line-height: 1.6;
     }
-    .modal-foot {
-      padding: 16px 24px 20px;
-      display: flex;
-      justify-content: flex-end;
-      gap: 10px;
-    }
-    .hidden { display: none !important; }
-
-    @media (max-width: 1200px) {
-      .stats-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-      .flow-grid { grid-template-columns: repeat(2, 1fr); }
-      .main-grid { grid-template-columns: 1fr; }
-      .record-list { max-height: 320px; }
-      .ontology-layout { grid-template-columns: 1fr; }
-    }
-    @media (max-width: 720px) {
-      .container { padding: 16px; }
-      .stats-grid, .info-grid, .flow-grid, .form-grid { grid-template-columns: 1fr; }
-      .stat-value { font-size: 28px; }
-      h1 { font-size: 26px; }
-      .modal-card { height: 95vh; }
-      .modal-head, .modal-tabs, .modal-body, .modal-foot { padding-left: 16px; padding-right: 16px; }
+    .pill { padding: 2px 8px; border-radius: 999px; font-size: 11px; border: 1px solid var(--border); color: var(--muted); }
+    .empty { color: var(--muted); padding: 20px; text-align: center; border: 1px dashed var(--border); border-radius: 14px; }
+    .footer-note { color: var(--muted); font-size: 12px; margin-top: 14px; }
+    @media (max-width: 1100px) {
+      .app { grid-template-columns: 1fr; }
+      aside { position: static; height: auto; }
+      .grid-2, .grid-3, .statbar { grid-template-columns: 1fr; }
     }
   </style>
 </head>
 <body>
-  <div class="container">
-    <div class="topbar">
-      <div>
-        <h1>Dashboard Kajian SROI PT Pertamina Lubricants</h1>
-        <p class="subtitle">Program TJSL Berorientasi CSV</p>
+  <div class="app">
+    <aside>
+      <div class="brand">
+        <h1>TJSL Ontology CRUD</h1>
+        <p>CRUD lokal untuk mengelola data analisis program TJSL berbasis kolom masif + struktur ontologi. Mendukung form, snippet, pitch view, JSON, dan breakdown cell multi-item.</p>
       </div>
-      <div class="actions">
-        <button class="btn primary" id="addBtn">Tambah</button>
-        <button class="btn" id="exportBtn">Export JSON</button>
-        <label class="btn" for="importInput">Import JSON</label>
-        <input id="importInput" type="file" accept="application/json" class="hidden" />
+      <div class="toolbar">
+        <button class="primary" id="addRowBtn">+ Tambah Row</button>
+        <button id="duplicateRowBtn">Duplikat</button>
+        <button class="danger" id="deleteRowBtn">Hapus</button>
       </div>
-    </div>
+      <div class="toolbar">
+        <button id="exportAllBtn">Export JSON</button>
+        <button id="importAllBtn">Import JSON</button>
+        <input type="file" id="importAllFile" accept="application/json" style="display:none" />
+      </div>
+      <input class="search" id="searchInput" placeholder="Cari program / sub-program / lokasi" />
+      <div class="row-list" id="rowList"></div>
+    </aside>
 
-    <div class="stats-grid" id="statsGrid"></div>
-
-    <div class="main-grid">
-      <div class="card">
-        <div class="panel-head">
-          <h2 class="panel-title">Daftar Record</h2>
-          <div class="search-wrap">
-            <span class="search-icon">⌕</span>
-            <input id="searchInput" placeholder="Cari program / sub-program..." />
+    <main>
+      <div class="panel" id="mainPanel">
+        <div class="header">
+          <h2 id="headerTitle">Belum ada row dipilih</h2>
+          <p id="headerSubtitle">Tambah atau pilih row di panel kiri.</p>
+          <div class="statbar">
+            <div class="stat"><div class="small">Program</div><div class="value" id="statProgram">-</div></div>
+            <div class="stat"><div class="small">Sub-Program</div><div class="value" id="statSubProgram">-</div></div>
+            <div class="stat"><div class="small">Status</div><div class="value" id="statStatus">-</div></div>
+            <div class="stat"><div class="small">Kelengkapan</div><div class="value" id="statCompleteness">0%</div></div>
           </div>
         </div>
-        <div class="panel-body">
-          <div class="record-list" id="recordList"></div>
+        <div class="tabbar">
+          <button data-tab="form" class="active">Form</button>
+          <button data-tab="snippet">Snippet</button>
+          <button data-tab="pitch">Pitch</button>
+          <button data-tab="json">JSON</button>
         </div>
+        <div class="tab-content" id="tabContent"></div>
       </div>
-
-      <div id="detailRoot"></div>
-    </div>
-  </div>
-
-  <div class="modal" id="recordModal">
-    <div class="modal-card">
-      <div class="modal-head">
-        <h2 id="modalTitle">Tambah Record</h2>
-        <button class="btn" id="closeModalBtn">Tutup</button>
-      </div>
-      <div class="modal-tabs">
-        <button class="tab-btn active" data-tab="columns">40 Kolom</button>
-        <button class="tab-btn" data-tab="ontology">Ontologi JSON</button>
-      </div>
-      <div class="modal-body">
-        <div class="tab-panel active" id="tab-columns">
-          <div class="scroll-pane">
-            <div class="form-grid">
-              <div class="field">
-                <label for="field-title">Judul / Nama Record</label>
-                <input id="field-title" />
-              </div>
-              <div class="field">
-                <label for="field-rowid">Row ID Ontologi</label>
-                <input id="field-rowid" placeholder="R_ENDURO_HOME_SERVICE_01" />
-              </div>
-            </div>
-            <div id="columnGroups"></div>
-          </div>
-        </div>
-        <div class="tab-panel" id="tab-ontology">
-          <div class="ontology-layout">
-            <textarea id="ontologyText" class="mono"></textarea>
-            <div class="card" style="border-radius: 22px; box-shadow: none;">
-              <div class="panel-head"><h3 class="panel-title" style="font-size:16px;">Panduan Ringkas</h3></div>
-              <div class="panel-body muted" style="font-size:14px; line-height:1.7;">
-                <p>Objek ontologi disimpan bersama record 40 kolom.</p>
-                <p>Gunakan struktur: identity, problems, activities, stakeholders, beneficiaries, outputs, outcomes, indicators, valuations, adjustments, final_values, notes, column_bindings.</p>
-                <p>Untuk problems, Anda bisa menambahkan field seperti: id, label, title, dimension, problem_type, description, narrative, dan source_refs.</p>
-                <p>Setiap node sebaiknya memiliki id agar mudah direferensikan.</p>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-      <div class="modal-foot">
-        <button class="btn" id="cancelBtn">Batal</button>
-        <button class="btn primary" id="saveBtn">Simpan</button>
-      </div>
-    </div>
+    </main>
   </div>
 
   <script>
-    const COLUMN_SCHEMA = [
-      { key: "nama_cdo", label: "Kolom 1: Nama CDO (Nama Penyusun)", group: "Identitas" },
-      { key: "unit_kerja", label: "Kolom 2: Unit Kerja", group: "Identitas" },
-      { key: "lokasi_pelaksanaan", label: "Kolom 3: Lokasi Pelaksanaan", group: "Identitas" },
-      { key: "permasalahan", label: "Kolom 4: Permasalahan", group: "Framing" },
-      { key: "program", label: "Kolom 5: Program", group: "Framing" },
-      { key: "sub_program", label: "Kolom 6: Sub-Program", group: "Framing" },
-      { key: "kegiatan_tahun", label: "Kolom 7: Kegiatan (Tahun)", group: "Intervensi" },
-      { key: "kegiatan_bentuk", label: "Kolom 8: Kegiatan (Bentuk)", group: "Intervensi" },
-      { key: "kegiatan_uraian", label: "Kolom 9: Kegiatan (Uraian)", group: "Intervensi" },
-      { key: "stakeholder_jenis", label: "Kolom 10: Stakeholder (Jenis)", group: "Intervensi" },
-      { key: "stakeholder_peran", label: "Kolom 11: Stakeholder (Peran)", group: "Intervensi" },
-      { key: "investasi_tahun", label: "Kolom 12: Investasi (Tahun)", group: "Intervensi" },
-      { key: "investasi_bentuk", label: "Kolom 13: Investasi (Bentuk)", group: "Intervensi" },
-      { key: "investasi_nominal", label: "Kolom 14: Investasi (Nominal)", group: "Intervensi" },
-      { key: "penerima_manfaat", label: "Kolom 15: Penerima Manfaat", group: "Intervensi" },
-      { key: "output", label: "Kolom 16: Output", group: "Intervensi" },
-      { key: "kondisi_sebelum_ekonomi", label: "Kolom 17: Kondisi Sebelum Program (Ekonomi)", group: "Baseline" },
-      { key: "kondisi_sebelum_sosial", label: "Kolom 18: Kondisi Sebelum Program (Sosial)", group: "Baseline" },
-      { key: "kondisi_sebelum_lingkungan", label: "Kolom 19: Kondisi Sebelum Program (Lingkungan)", group: "Baseline" },
-      { key: "kondisi_sebelum_wellbeing", label: "Kolom 20: Kondisi Sebelum Program (Well-Being)", group: "Baseline" },
-      { key: "outcome_ekonomi", label: "Kolom 21: Outcome (Ekonomi)", group: "Outcome" },
-      { key: "outcome_sosial", label: "Kolom 22: Outcome (Sosial)", group: "Outcome" },
-      { key: "outcome_lingkungan", label: "Kolom 23: Outcome (Lingkungan)", group: "Outcome" },
-      { key: "outcome_wellbeing", label: "Kolom 24: Outcome (Well-Being)", group: "Outcome" },
-      { key: "indikator_ekonomi", label: "Kolom 25: Penetapan Indikator Kuantitatif (Ekonomi)", group: "Indikator" },
-      { key: "indikator_sosial", label: "Kolom 26: Penetapan Indikator Kuantitatif (Sosial)", group: "Indikator" },
-      { key: "indikator_lingkungan", label: "Kolom 27: Penetapan Indikator Kuantitatif (Lingkungan)", group: "Indikator" },
-      { key: "indikator_wellbeing", label: "Kolom 28: Penetapan Indikator Kuantitatif (Well-Being)", group: "Indikator" },
-      { key: "monetisasi_aspek", label: "Kolom 29: Monetisasi Sebelum Fiksasi (Aspek)", group: "Monetisasi" },
-      { key: "monetisasi_2022", label: "Kolom 30: Monetisasi Sebelum Fiksasi (2022)", group: "Monetisasi" },
-      { key: "monetisasi_2023", label: "Kolom 31: Monetisasi Sebelum Fiksasi (2023)", group: "Monetisasi" },
-      { key: "monetisasi_2024", label: "Kolom 32: Monetisasi Sebelum Fiksasi (2024)", group: "Monetisasi" },
-      { key: "deadweight", label: "Kolom 33: Fiksasi Dampak (Deadweight)", group: "Fiksasi" },
-      { key: "attribution", label: "Kolom 34: Fiksasi Dampak (Attribution)", group: "Fiksasi" },
-      { key: "drop_off", label: "Kolom 35: Fiksasi Dampak (Drop Off)", group: "Fiksasi" },
-      { key: "nilai_monetisasi_aspek", label: "Kolom 36: Nilai Monetisasi Setelah Fiksasi (Aspek)", group: "Nilai Final" },
-      { key: "nilai_monetisasi_2022", label: "Kolom 37: Nilai Monetisasi Setelah Fiksasi (2022)", group: "Nilai Final" },
-      { key: "nilai_monetisasi_2023", label: "Kolom 38: Nilai Monetisasi Setelah Fiksasi (2023)", group: "Nilai Final" },
-      { key: "nilai_monetisasi_2024", label: "Kolom 39: Nilai Monetisasi Setelah Fiksasi (2024)", group: "Nilai Final" },
-      { key: "informasi_umum", label: "Kolom 40: Informasi Umum", group: "Catatan" }
-    ];
-
-    const GROUP_ORDER = ["Identitas", "Framing", "Intervensi", "Baseline", "Outcome", "Indikator", "Monetisasi", "Fiksasi", "Nilai Final", "Catatan"];
-
-    const groupedColumns = GROUP_ORDER.map(group => ({
-      group,
-      columns: COLUMN_SCHEMA.filter(c => c.group === group)
-    }));
-
-    const STORAGE_KEY = "tjsl_csv_records_v1";
-    let records = [];
-    let selectedId = null;
-    let editingId = null;
-    let query = "";
-
-    const iconMap = {
-      subprogram: "🧩",
-      investasi: "💰",
-      manfaat: "👥",
-      outcome: "🎯",
-      sroi: "∑"
+    const STORAGE_KEY = 'tjsl-ontology-crud-v1';
+    const appState = {
+      rows: [],
+      selectedId: null,
+      activeTab: 'form'
     };
 
-    function safeId() {
-      return (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : `id_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-    }
+    const FIELD_SCHEMA = {
+      identity: [
+        { key: 'cdo_name', label: 'Kolom 1 — Nama CDO', type: 'text' },
+        { key: 'unit_kerja', label: 'Kolom 2 — Unit Kerja', type: 'text' },
+        { key: 'lokasi', label: 'Kolom 3 — Lokasi Pelaksanaan', type: 'text' },
+        { key: 'program', label: 'Kolom 5 — Program', type: 'text' },
+        { key: 'sub_program', label: 'Kolom 6 — Sub-Program', type: 'text' }
+      ],
+      multi: {
+        problems: { label: 'Kolom 4 — Permasalahan', itemLabel: 'Problem', fields: [
+          { key: 'id', label: 'ID', type: 'text' },
+          { key: 'title', label: 'Judul', type: 'text' },
+          { key: 'dimension', label: 'Dimensi', type: 'select', options: ['economic','social','environmental','well_being','general'] },
+          { key: 'description', label: 'Deskripsi', type: 'textarea' },
+          { key: 'normative_basis', label: 'Dasar Normatif (pisahkan dengan ;)', type: 'text' },
+          { key: 'evidence_basis', label: 'Basis Evidensi (pisahkan dengan ;)', type: 'text' }
+        ]},
+        activities: { label: 'Kolom 7–9 — Kegiatan', itemLabel: 'Kegiatan', fields: [
+          { key: 'id', label: 'ID', type: 'text' },
+          { key: 'year', label: 'Tahun', type: 'text' },
+          { key: 'form', label: 'Bentuk', type: 'text' },
+          { key: 'title', label: 'Judul', type: 'text' },
+          { key: 'description', label: 'Uraian', type: 'textarea' },
+          { key: 'addresses_problem_ids', label: 'Referensi Problem IDs (pisahkan dengan koma)', type: 'text' }
+        ]},
+        stakeholders: { label: 'Kolom 10–11 — Stakeholder', itemLabel: 'Stakeholder', fields: [
+          { key: 'id', label: 'ID', type: 'text' },
+          { key: 'name', label: 'Nama', type: 'text' },
+          { key: 'jenis', label: 'Jenis', type: 'text' },
+          { key: 'role', label: 'Peran', type: 'textarea' },
+          { key: 'related_activity_ids', label: 'Referensi Activity IDs (pisahkan dengan koma)', type: 'text' }
+        ]},
+        investments: { label: 'Kolom 12–14 — Investasi', itemLabel: 'Investasi', fields: [
+          { key: 'id', label: 'ID', type: 'text' },
+          { key: 'year', label: 'Tahun', type: 'text' },
+          { key: 'form', label: 'Bentuk', type: 'text' },
+          { key: 'amount', label: 'Nominal', type: 'number' },
+          { key: 'currency', label: 'Mata Uang', type: 'text' },
+          { key: 'description', label: 'Deskripsi', type: 'textarea' },
+          { key: 'related_activity_ids', label: 'Referensi Activity IDs (pisahkan dengan koma)', type: 'text' }
+        ]},
+        beneficiaries: { label: 'Kolom 15 — Penerima Manfaat', itemLabel: 'Penerima Manfaat', fields: [
+          { key: 'id', label: 'ID', type: 'text' },
+          { key: 'name', label: 'Nama', type: 'text' },
+          { key: 'type', label: 'Tipe', type: 'select', options: ['direct','indirect'] },
+          { key: 'count', label: 'Jumlah', type: 'number' },
+          { key: 'unit', label: 'Satuan', type: 'text' },
+          { key: 'description', label: 'Deskripsi', type: 'textarea' }
+        ]},
+        outputs: { label: 'Kolom 16 — Output', itemLabel: 'Output', fields: [
+          { key: 'id', label: 'ID', type: 'text' },
+          { key: 'title', label: 'Judul', type: 'text' },
+          { key: 'description', label: 'Deskripsi', type: 'textarea' },
+          { key: 'related_activity_ids', label: 'Referensi Activity IDs (pisahkan dengan koma)', type: 'text' },
+          { key: 'target_beneficiary_ids', label: 'Referensi Beneficiary IDs (pisahkan dengan koma)', type: 'text' }
+        ]},
+        indicators: { label: 'Kolom 25–28 — Indikator Kuantitatif', itemLabel: 'Indikator', fields: [
+          { key: 'id', label: 'ID', type: 'text' },
+          { key: 'dimension', label: 'Dimensi', type: 'select', options: ['economic','social','environmental','well_being'] },
+          { key: 'title', label: 'Judul', type: 'text' },
+          { key: 'description', label: 'Deskripsi', type: 'textarea' },
+          { key: 'unit', label: 'Unit', type: 'text' },
+          { key: 'measurement_method', label: 'Metode Pengukuran', type: 'text' },
+          { key: 'related_outcome_id', label: 'Referensi Outcome ID', type: 'text' }
+        ]},
+        valuations: { label: 'Kolom 29–32 — Monetisasi Sebelum Fiksasi', itemLabel: 'Monetisasi', fields: [
+          { key: 'id', label: 'ID', type: 'text' },
+          { key: 'aspect', label: 'Aspek', type: 'text' },
+          { key: 'related_indicator_id', label: 'Referensi Indicator ID', type: 'text' },
+          { key: 'proxy_label', label: 'Label Proksi', type: 'text' },
+          { key: 'proxy_value', label: 'Nilai Proksi', type: 'number' },
+          { key: 'beneficiary_count', label: 'Jumlah Penerima Manfaat', type: 'number' },
+          { key: 'value_2022', label: '2022', type: 'number' },
+          { key: 'value_2023', label: '2023', type: 'number' },
+          { key: 'value_2024', label: '2024', type: 'number' },
+          { key: 'calculation_logic', label: 'Logika Hitung', type: 'textarea' }
+        ]},
+        final_values: { label: 'Kolom 41–44 — Nilai Setelah Fiksasi', itemLabel: 'Nilai Akhir', fields: [
+          { key: 'id', label: 'ID', type: 'text' },
+          { key: 'aspect', label: 'Aspek', type: 'text' },
+          { key: 'source_monetisation_id', label: 'Referensi Monetisasi ID', type: 'text' },
+          { key: 'value_2022', label: '2022', type: 'number' },
+          { key: 'value_2023', label: '2023', type: 'number' },
+          { key: 'value_2024', label: '2024', type: 'number' },
+          { key: 'calculation_logic', label: 'Logika Hitung', type: 'textarea' }
+        ]},
+        notes: { label: 'Catatan / Informasi Umum Tambahan', itemLabel: 'Catatan', fields: [
+          { key: 'id', label: 'ID', type: 'text' },
+          { key: 'type', label: 'Tipe', type: 'text' },
+          { key: 'text', label: 'Isi Catatan', type: 'textarea' }
+        ]}
+      },
+      rich: [
+        { key: 'baseline_economic', label: 'Kolom 17 — Kondisi Sebelum Program (Ekonomi)' },
+        { key: 'baseline_social', label: 'Kolom 18 — Kondisi Sebelum Program (Sosial)' },
+        { key: 'baseline_environmental', label: 'Kolom 19 — Kondisi Sebelum Program (Lingkungan)' },
+        { key: 'baseline_well_being', label: 'Kolom 20 — Kondisi Sebelum Program (Well-Being)' },
+        { key: 'outcome_economic', label: 'Kolom 21 — Outcome (Ekonomi)' },
+        { key: 'outcome_social', label: 'Kolom 22 — Outcome (Sosial)' },
+        { key: 'outcome_environmental', label: 'Kolom 23 — Outcome (Lingkungan)' },
+        { key: 'outcome_well_being', label: 'Kolom 24 — Outcome (Well-Being)' },
+        { key: 'info_umum', label: 'Kolom 45 — Informasi Umum' }
+      ],
+      adjustmentTypes: [
+        { type: 'deadweight', label: 'Kolom 33–34 — Deadweight' },
+        { type: 'displacement', label: 'Kolom 35–36 — Displacement' },
+        { type: 'attribution', label: 'Kolom 37–38 — Attribution' },
+        { type: 'drop_off', label: 'Kolom 39–40 — Drop-off' }
+      ]
+    };
 
-    function emptyOntology() {
+    function uid(prefix='ID') { return `${prefix}_${Math.random().toString(36).slice(2, 8)}`.toUpperCase(); }
+
+    function defaultRow() {
       return {
-        row_id: "",
-        identity: { cdo_name: "", unit_kerja: "", lokasi: "", program: "", sub_program: "" },
-        problems: [],
-        activities: [],
-        stakeholders: [],
-        investments: [],
-        beneficiaries: [],
-        outputs: [],
-        baselines: [],
-        outcomes: [],
-        indicators: [],
-        valuations: [],
-        adjustments: [],
-        final_values: [],
-        notes: [],
-        column_bindings: {}
-      };
-    }
-
-    function emptyRecord() {
-      const obj = {
-        id: safeId(),
-        title: "",
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-        ontology: emptyOntology()
-      };
-      COLUMN_SCHEMA.forEach(c => obj[c.key] = "");
-      return obj;
-    }
-
-    function seed() {
-      const r = emptyRecord();
-      r.title = "Contoh – Enduro Home Service";
-      r.program = "TJSL CSV PT Pertamina Lubricants";
-      r.sub_program = "Enduro Home Service";
-      r.investasi_nominal = "25000000";
-      r.penerima_manfaat = "25 siswa SMK";
-      r.permasalahan = "Penguatan keterampilan praktis berbasis layanan, kesiapan kerja, model home service, dan literasi produk Enduro.";
-      r.output = "Siswa memperoleh pelatihan teknik perbaikan kendaraan ringan, layanan home service, dan pengenalan pelumas Enduro.";
-      r.nilai_monetisasi_2024 = "72576000";
-      r.ontology = {
-        ...emptyOntology(),
-        row_id: "R_ENDURO_HOME_SERVICE_01",
-        identity: {
-          cdo_name: "",
-          unit_kerja: "PT Pertamina Lubricants",
-          lokasi: "",
-          program: "TJSL CSV PT Pertamina Lubricants",
-          sub_program: "Enduro Home Service"
+        id: uid('ROW'),
+        meta: {
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+          status: 'draft',
+          version: 1,
+          tags: []
         },
-        problems: [
-          {
-            id: "P1",
-            label: "penguatan keterampilan praktis berbasis layanan",
-            title: "Kebutuhan penguatan keterampilan praktis siswa SMK agar lebih aplikatif terhadap konteks layanan nyata.",
-            dimension: "economic",
-            problem_type: "normative_operational_gap",
-            narrative: "Capaian Pembelajaran Teknik Sepeda Motor Fase F telah menargetkan peserta didik mampu mendiagnosis gangguan atau kerusakan dan melakukan tindakan perbaikan pada berbagai sistem sepeda motor, mulai dari engine, sistem pelumasan, sistem pendinginan, sistem bahan bakar, sasis, sistem pemindah tenaga, sistem kelistrikan, hingga engine management system. Namun demikian, target kompetensi normatif tersebut masih perlu diterjemahkan lebih jauh ke dalam pengalaman belajar yang benar-benar aplikatif terhadap kebutuhan layanan nyata di lapangan. Dalam konteks ini, persoalannya bukan bahwa siswa SMK tidak memiliki dasar kompetensi, melainkan bahwa penguatan keterampilan praktis yang lebih dekat dengan situasi servis riil, interaksi langsung dengan kendaraan konsumen, dan penanganan problem teknis secara kontekstual masih menjadi ruang penting untuk diperkuat."
-          },
-          {
-            id: "P2",
-            label: "penguatan kesiapan kerja dan transisi sekolah-ke-kerja",
-            title: "Kebutuhan penguatan kesiapan kerja dan transisi sekolah-ke-dunia kerja atau usaha.",
-            dimension: "economic",
-            problem_type: "school_to_work_transition_gap",
-            narrative: "Pada level kebijakan nasional, Inpres No. 9 Tahun 2016 menegaskan pentingnya revitalisasi SMK guna meningkatkan kualitas dan daya saing sumber daya manusia Indonesia, sedangkan Perpres No. 68 Tahun 2022 memperluas agenda tersebut ke revitalisasi pendidikan vokasi dan pelatihan vokasi agar lebih bermutu, relevan, dan terhubung dengan kebutuhan pembangunan serta dunia kerja. Dengan arah kebijakan seperti ini, siswa SMK pada dasarnya diposisikan bukan hanya sebagai peserta didik yang menguasai kompetensi teknis, tetapi juga sebagai calon tenaga kerja terampil atau calon pelaku usaha yang siap memasuki dunia kerja. Namun dari sisi hasil pasar kerja, data BPS menunjukkan bahwa lulusan SMK masih mencatat Tingkat Pengangguran Terbuka tertinggi pada tahun 2025, yakni sebesar 8,63 persen. Kondisi ini menunjukkan bahwa penguatan kesiapan kerja, kesiapan layanan, dan kesiapan transisi menuju pekerjaan atau usaha mandiri tetap merupakan isu yang relevan untuk dijawab melalui intervensi program."
-          },
-          {
-            id: "P3",
-            label: "kebutuhan kompetensi layanan jemput bola",
-            title: "Kebutuhan penguatan model pembelajaran dan layanan yang selaras dengan orientasi link and match 8+i.",
-            dimension: "social",
-            problem_type: "service_model_gap",
-            narrative: "Arah pengembangan pendidikan vokasi nasional tidak hanya menekankan penguasaan kompetensi teknis, tetapi juga penyelarasan yang lebih kuat dengan dunia kerja. Dalam konteks kebijakan dan diskursus pendidikan vokasi, konsep link and match 8+i digunakan untuk mendorong keselarasan yang lebih bermakna antara satuan pendidikan vokasi dan dunia kerja, termasuk melalui kurikulum yang disusun bersama industri, pembelajaran berbasis proyek nyata, keterlibatan praktisi industri, magang, sertifikasi kompetensi, dan orientasi penyerapan lulusan. Dalam kerangka itu, tantangan yang dihadapi bukan sekadar bagaimana siswa mampu memperbaiki sepeda motor secara teknis, tetapi bagaimana keterampilan tersebut ditransformasikan menjadi kompetensi layanan yang relevan dengan kebutuhan masyarakat. Untuk sub-program Enduro Home Service, ini berarti terdapat kebutuhan penguatan model layanan jemput bola atau home service yang menuntut orientasi pelanggan, respons lapangan, mobilitas layanan, serta penerapan keterampilan teknis dalam konteks kerja yang lebih nyata daripada sekadar praktik bengkel konvensional di sekolah."
-          },
-          {
-            id: "P4",
-            label: "kebutuhan literasi produk Enduro untuk shared value",
-            title: "Kebutuhan penguatan relevansi industri melalui literasi produk pelumas dan penciptaan shared value.",
-            dimension: "economic",
-            problem_type: "industry_relevance_gap",
-            narrative: "Sejalan dengan semangat revitalisasi vokasi dan link and match, pembelajaran siswa SMK juga perlu semakin dekat dengan praktik industri yang aktual. Dalam konteks sub-program ini, penguatan keterampilan teknis servis kendaraan ringan belum cukup apabila tidak diikuti dengan pemahaman mengenai penggunaan produk pelumas yang relevan dalam praktik servis. Karena itu, kebutuhan masalah yang juga muncul adalah bagaimana siswa SMK tidak hanya memahami aspek teknis perbaikan kendaraan, tetapi juga memiliki literasi produk pelumas Enduro sebagai bagian dari layanan servis yang bernilai, meyakinkan, dan sesuai dengan kebutuhan konsumen. Dalam logika TJSL-CSV, titik ini menjadi penting karena menghubungkan peningkatan kompetensi siswa, kualitas layanan kepada masyarakat, dan pembentukan nilai bersama bagi PT Pertamina Lubricants sebagai pelaksana program. Dengan demikian, persoalannya tidak berhenti pada pelatihan teknik semata, tetapi pada kebutuhan membangun keterhubungan yang lebih utuh antara pendidikan vokasi, praktik layanan, dan relevansi industri."
-          }
-        ],
-        beneficiaries: [{ id: "B1", label: "siswa SMK", type: "direct", count: 25 }],
-        valuations: [{ id: "V1", label: "nilai outcome", value_2024: 72576000 }],
-        notes: [{ id: "N1", type: "csv_logic", text: "Shared value dibentuk melalui kompetensi siswa dan literasi produk Enduro." }],
-        column_bindings: { "4": ["P1", "P2", "P3", "P4"], "15": ["B1"] }
+        columns: {},
+        ontology: {
+          identity: { cdo_name: '', unit_kerja: '', lokasi: '', program: '', sub_program: '' },
+          problems: [], activities: [], stakeholders: [], investments: [], beneficiaries: [], outputs: [],
+          baselines: [], outcomes: [], indicators: [], valuations: [], impact_adjustments: [], final_values: [], notes: [],
+          column_bindings: {}
+        },
+        ui_state: { expanded_sections: {}, last_edit_mode: 'form' }
       };
-      return [r];
     }
 
-    function toNumber(value) {
-      if (typeof value === "number") return Number.isFinite(value) ? value : 0;
-      if (typeof value !== "string") return 0;
-      const cleaned = value.replace(/[^0-9,.-]/g, "").replace(/\.(?=.*\.)/g, "").replace(/,/g, "");
-      const num = parseFloat(cleaned);
-      return Number.isFinite(num) ? num : 0;
+    function saveState() {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ rows: appState.rows, selectedId: appState.selectedId }));
     }
 
-    function formatNumber(value) {
-      return new Intl.NumberFormat("id-ID").format(Number.isFinite(value) ? value : 0);
-    }
-
-    function formatCurrency(value) {
-      return `Rp${formatNumber(value)}`;
-    }
-
-    function extractBeneficiaryCount(record) {
-      const ontologyCounts = Array.isArray(record?.ontology?.beneficiaries)
-        ? record.ontology.beneficiaries.reduce((sum, item) => sum + toNumber(item?.count ?? 0), 0)
-        : 0;
-      if (ontologyCounts > 0) return ontologyCounts;
-      return toNumber(record?.penerima_manfaat || 0);
-    }
-
-    function calcRecordOutcomeValue(record) {
-      const candidates = [
-        record?.nilai_monetisasi_2024,
-        record?.nilai_monetisasi_2023,
-        record?.nilai_monetisasi_2022,
-        record?.monetisasi_2024,
-        record?.monetisasi_2023,
-        record?.monetisasi_2022
-      ].map(toNumber);
-      return candidates.find(v => v > 0) || 0;
-    }
-
-    function calcRecordInvestment(record) {
-      return toNumber(record?.investasi_nominal || 0);
-    }
-
-    function calcSROI(totalOutcome, totalInvestment) {
-      if (!totalInvestment) return 0;
-      return totalOutcome / totalInvestment;
-    }
-
-    function loadRecords() {
+    function loadState() {
       const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) {
-        try {
-          records = JSON.parse(raw);
-        } catch {
-          records = seed();
-        }
-      } else {
-        records = seed();
-        persist();
-      }
-      selectedId = records[0]?.id || null;
-    }
-
-    function persist() {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(records));
-    }
-
-    function getFilteredRecords() {
-      const q = query.trim().toLowerCase();
-      return records.filter(r =>
-        [r.title, r.program, r.sub_program, r.permasalahan, r.penerima_manfaat].join(" ").toLowerCase().includes(q)
-      );
-    }
-
-    function getSelectedRecord(filtered) {
-      return filtered.find(r => r.id === selectedId) || filtered[0] || null;
-    }
-
-    function dashboardStats() {
-      const totalSubPrograms = records.length;
-      const totalInvestment = records.reduce((sum, r) => sum + calcRecordInvestment(r), 0);
-      const totalBeneficiaries = records.reduce((sum, r) => sum + extractBeneficiaryCount(r), 0);
-      const totalOutcomeValue = records.reduce((sum, r) => sum + calcRecordOutcomeValue(r), 0);
-      const sroi = calcSROI(totalOutcomeValue, totalInvestment);
-      return { totalSubPrograms, totalInvestment, totalBeneficiaries, totalOutcomeValue, sroi };
-    }
-
-    function renderStats() {
-      const stats = dashboardStats();
-      const items = [
-        { title: "Jumlah Sub Program", value: formatNumber(stats.totalSubPrograms), helper: "Total row/sub-program tersimpan", icon: iconMap.subprogram },
-        { title: "Total Investasi", value: formatCurrency(stats.totalInvestment), helper: "Akumulasi kolom investasi nominal", icon: iconMap.investasi },
-        { title: "Total Penerima Manfaat", value: formatNumber(stats.totalBeneficiaries), helper: "Diambil dari count ontologi atau angka pada kolom", icon: iconMap.manfaat },
-        { title: "Total Nilai Outcome", value: formatCurrency(stats.totalOutcomeValue), helper: "Mengutamakan nilai monetisasi final, lalu gross value", icon: iconMap.outcome },
-        { title: "Nilai SROI", value: stats.sroi ? `${stats.sroi.toFixed(2)}x` : "0.00x", helper: "Total nilai outcome ÷ total investasi", icon: iconMap.sroi }
-      ];
-      document.getElementById("statsGrid").innerHTML = items.map(item => `
-        <div class="stat-card">
-          <div>
-            <div class="stat-title">${item.title}</div>
-            <div class="stat-value">${item.value}</div>
-            <div class="stat-helper">${item.helper}</div>
-          </div>
-          <div class="stat-icon">${item.icon}</div>
-        </div>
-      `).join("");
-    }
-
-    function renderRecordList(filtered, selected) {
-      const root = document.getElementById("recordList");
-      if (!filtered.length) {
-        root.innerHTML = `<div class="muted">Tidak ada data.</div>`;
+      if (!raw) {
+        const row = defaultRow();
+        appState.rows = [row];
+        appState.selectedId = row.id;
+        saveState();
         return;
       }
-      root.innerHTML = filtered.map(r => `
-        <div class="record-item ${selected?.id === r.id ? 'active' : ''}" data-id="${r.id}">
-          <div style="font-weight:700;">${escapeHtml(r.title || r.sub_program || 'Tanpa Judul')}</div>
-          <div class="meta">${escapeHtml(r.program || '-')}</div>
-          <div style="margin-top:10px;"><span class="badge">${escapeHtml(r.sub_program || '-')}</span></div>
-        </div>
-      `).join("");
+      try {
+        const parsed = JSON.parse(raw);
+        appState.rows = parsed.rows || [];
+        appState.selectedId = parsed.selectedId || (appState.rows[0]?.id ?? null);
+        if (!appState.rows.length) {
+          const row = defaultRow();
+          appState.rows = [row];
+          appState.selectedId = row.id;
+        }
+      } catch {
+        const row = defaultRow();
+        appState.rows = [row];
+        appState.selectedId = row.id;
+      }
+    }
 
-      root.querySelectorAll('.record-item').forEach(el => {
-        el.addEventListener('click', () => {
-          selectedId = el.dataset.id;
-          renderApp();
-        });
+    function getSelectedRow() {
+      return appState.rows.find(r => r.id === appState.selectedId) || null;
+    }
+
+    function touch(row) {
+      row.meta.updated_at = new Date().toISOString();
+      syncColumnsFromOntology(row);
+      saveState();
+      renderAll();
+    }
+
+    function splitList(v) {
+      if (Array.isArray(v)) return v;
+      return String(v || '').split(/[;,]/).map(s => s.trim()).filter(Boolean);
+    }
+
+    function formatMoney(v) {
+      if (v === null || v === undefined || v === '') return '-';
+      return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(Number(v) || 0);
+    }
+
+    function syncColumnsFromOntology(row) {
+      const o = row.ontology;
+      const c = row.columns;
+      c.col_1_nama_cdo = o.identity.cdo_name || '';
+      c.col_2_unit_kerja = o.identity.unit_kerja || '';
+      c.col_3_lokasi_pelaksanaan = o.identity.lokasi || '';
+      c.col_5_program = o.identity.program || '';
+      c.col_6_sub_program = o.identity.sub_program || '';
+      c.col_4_permasalahan = o.problems.map(p => ({ id: p.id, title: p.title || '', description: p.description || '' }));
+      c.col_7_kegiatan_tahun = o.activities.map(a => ({ id: a.id, year: a.year || '' }));
+      c.col_8_kegiatan_bentuk = o.activities.map(a => ({ id: a.id, form: a.form || '' }));
+      c.col_9_kegiatan_uraian = o.activities.map(a => ({ id: a.id, description: a.description || '' }));
+      c.col_10_stakeholder_jenis = o.stakeholders.map(s => ({ id: s.id, jenis: s.jenis || '' }));
+      c.col_11_stakeholder_peran = o.stakeholders.map(s => ({ id: s.id, role: s.role || '' }));
+      c.col_12_investasi_tahun = o.investments.map(i => ({ id: i.id, year: i.year || '' }));
+      c.col_13_investasi_bentuk = o.investments.map(i => ({ id: i.id, form: i.form || '' }));
+      c.col_14_investasi_nominal = o.investments.map(i => ({ id: i.id, amount: i.amount ?? null }));
+      c.col_15_penerima_manfaat = o.beneficiaries.map(b => ({ id: b.id, name: b.name || '', count: b.count ?? null }));
+      c.col_16_output = o.outputs.map(out => ({ id: out.id, title: out.title || '', description: out.description || '' }));
+      c.col_17_kondisi_sebelum_ekonomi = o.baselines.find(x => x.dimension === 'economic')?.description || '';
+      c.col_18_kondisi_sebelum_sosial = o.baselines.find(x => x.dimension === 'social')?.description || '';
+      c.col_19_kondisi_sebelum_lingkungan = o.baselines.find(x => x.dimension === 'environmental')?.description || '';
+      c.col_20_kondisi_sebelum_well_being = o.baselines.find(x => x.dimension === 'well_being')?.description || '';
+      c.col_21_outcome_ekonomi = o.outcomes.find(x => x.dimension === 'economic')?.description || '';
+      c.col_22_outcome_sosial = o.outcomes.find(x => x.dimension === 'social')?.description || '';
+      c.col_23_outcome_lingkungan = o.outcomes.find(x => x.dimension === 'environmental')?.description || '';
+      c.col_24_outcome_well_being = o.outcomes.find(x => x.dimension === 'well_being')?.description || '';
+      c.col_25_indikator_ekonomi = o.indicators.filter(x => x.dimension === 'economic');
+      c.col_26_indikator_sosial = o.indicators.filter(x => x.dimension === 'social');
+      c.col_27_indikator_lingkungan = o.indicators.filter(x => x.dimension === 'environmental');
+      c.col_28_indikator_well_being = o.indicators.filter(x => x.dimension === 'well_being');
+      c.col_29_monetisasi_sebelum_fiksasi_aspek = o.valuations.map(v => ({ id: v.id, aspect: v.aspect }));
+      c.col_30_monetisasi_sebelum_fiksasi_2022 = o.valuations.map(v => ({ id: v.id, value_2022: v.value_2022 ?? null }));
+      c.col_31_monetisasi_sebelum_fiksasi_2023 = o.valuations.map(v => ({ id: v.id, value_2023: v.value_2023 ?? null }));
+      c.col_32_monetisasi_sebelum_fiksasi_2024 = o.valuations.map(v => ({ id: v.id, value_2024: v.value_2024 ?? null }));
+      const adj = Object.fromEntries((o.impact_adjustments || []).map(a => [a.type, a]));
+      c.col_33_justifikasi_deadweight = adj.deadweight?.justification_points || [];
+      c.col_34_nilai_deadweight = adj.deadweight?.final_value ?? '';
+      c.col_35_justifikasi_displacement = adj.displacement?.justification_points || [];
+      c.col_36_nilai_displacement = adj.displacement?.final_value ?? '';
+      c.col_37_justifikasi_attribution = adj.attribution?.justification_points || [];
+      c.col_38_nilai_attribution = adj.attribution?.final_value ?? '';
+      c.col_39_justifikasi_drop_off = adj.drop_off?.justification_points || [];
+      c.col_40_nilai_drop_off = adj.drop_off?.final_value ?? '';
+      c.col_41_nilai_setelah_fiksasi_aspek = o.final_values.map(v => ({ id: v.id, aspect: v.aspect }));
+      c.col_42_nilai_setelah_fiksasi_2022 = o.final_values.map(v => ({ id: v.id, value_2022: v.value_2022 ?? null }));
+      c.col_43_nilai_setelah_fiksasi_2023 = o.final_values.map(v => ({ id: v.id, value_2023: v.value_2023 ?? null }));
+      c.col_44_nilai_setelah_fiksasi_2024 = o.final_values.map(v => ({ id: v.id, value_2024: v.value_2024 ?? null }));
+      c.col_45_informasi_umum = o.notes.map(n => n.text).join('\n\n');
+      row.ontology.column_bindings = {
+        4: o.problems.map(x => x.id), 7: o.activities.map(x => x.id), 8: o.activities.map(x => x.id), 9: o.activities.map(x => x.id),
+        10: o.stakeholders.map(x => x.id), 11: o.stakeholders.map(x => x.id), 12: o.investments.map(x => x.id), 13: o.investments.map(x => x.id), 14: o.investments.map(x => x.id),
+        15: o.beneficiaries.map(x => x.id), 16: o.outputs.map(x => x.id), 25: o.indicators.filter(x=>x.dimension==='economic').map(x=>x.id), 26: o.indicators.filter(x=>x.dimension==='social').map(x=>x.id),
+        27: o.indicators.filter(x=>x.dimension==='environmental').map(x=>x.id), 28: o.indicators.filter(x=>x.dimension==='well_being').map(x=>x.id),
+        29: o.valuations.map(x=>x.id), 33: adj.deadweight ? [adj.deadweight.id] : [], 35: adj.displacement ? [adj.displacement.id] : [],
+        37: adj.attribution ? [adj.attribution.id] : [], 39: adj.drop_off ? [adj.drop_off.id] : [], 41: o.final_values.map(x=>x.id)
+      };
+    }
+
+    function computeCompleteness(row) {
+      const o = row.ontology;
+      const checks = [
+        !!o.identity.program, !!o.identity.sub_program, !!o.identity.unit_kerja,
+        o.problems.length > 0, o.activities.length > 0, o.stakeholders.length > 0,
+        o.investments.length > 0, o.beneficiaries.length > 0, o.outputs.length > 0,
+        o.baselines.length >= 1, o.outcomes.length >= 1, o.indicators.length >= 1,
+        o.valuations.length >= 1, o.impact_adjustments.length >= 1, o.final_values.length >= 1
+      ];
+      return Math.round((checks.filter(Boolean).length / checks.length) * 100);
+    }
+
+    function renderAll() {
+      renderRowList();
+      renderHeader();
+      renderTab();
+    }
+
+    function renderRowList() {
+      const q = document.getElementById('searchInput').value.toLowerCase().trim();
+      const container = document.getElementById('rowList');
+      container.innerHTML = '';
+      const rows = appState.rows.filter(r => {
+        const text = [r.ontology.identity.program, r.ontology.identity.sub_program, r.ontology.identity.lokasi, r.id].join(' ').toLowerCase();
+        return text.includes(q);
       });
-    }
-
-    function sectionDetails(title, content, open = false) {
-      return `
-        <details class="section" ${open ? 'open' : ''}>
-          <summary>${title}<span class="summary-arrow">›</span></summary>
-          <div class="section-content">${content}</div>
-        </details>
-      `;
-    }
-
-    function infoBox(title, content) {
-      return `
-        <div class="info-box">
-          <div class="box-title">${title}</div>
-          <div class="box-content">${escapeHtml(content || 'Belum diisi')}</div>
-        </div>
-      `;
-    }
-
-    function flowBox(title, content) {
-      return `
-        <div class="flow-box">
-          <div class="box-title">${title}</div>
-          <div class="box-content">${escapeHtml(content || 'Belum diisi')}</div>
-        </div>
-      `;
-    }
-
-    function renderDetail(selected) {
-      const root = document.getElementById('detailRoot');
-      if (!selected) {
-        root.innerHTML = `
-          <div class="card empty-state">
-            <div>
-              <div style="font-size:20px; font-weight:700; color:var(--text);">Belum ada record dipilih</div>
-              <div style="margin-top:8px;">Tambahkan data pertama Anda untuk mulai mengelola 40 kolom dan struktur ontologi.</div>
-            </div>
+      if (!rows.length) {
+        container.innerHTML = '<div class="empty">Tidak ada row yang cocok.</div>';
+        return;
+      }
+      rows.forEach(row => {
+        const card = document.createElement('div');
+        card.className = 'row-card' + (row.id === appState.selectedId ? ' active' : '');
+        const p = row.ontology.identity.program || 'Program belum diisi';
+        const sp = row.ontology.identity.sub_program || 'Sub-program belum diisi';
+        card.innerHTML = `
+          <h3>${escapeHtml(sp)}</h3>
+          <p>${escapeHtml(p)}</p>
+          <div class="chips">
+            <span class="chip">${escapeHtml(row.id)}</span>
+            <span class="chip">${computeCompleteness(row)}%</span>
+            <span class="chip">${escapeHtml(row.meta.status)}</span>
           </div>
         `;
+        card.onclick = () => { appState.selectedId = row.id; saveState(); renderAll(); };
+        container.appendChild(card);
+      });
+    }
+
+    function renderHeader() {
+      const row = getSelectedRow();
+      document.getElementById('headerTitle').textContent = row ? (row.ontology.identity.sub_program || 'Sub-program belum diisi') : 'Belum ada row dipilih';
+      document.getElementById('headerSubtitle').textContent = row ? `${row.ontology.identity.program || 'Program belum diisi'} • ${row.id}` : 'Tambah atau pilih row di panel kiri.';
+      document.getElementById('statProgram').textContent = row?.ontology.identity.program || '-';
+      document.getElementById('statSubProgram').textContent = row?.ontology.identity.sub_program || '-';
+      document.getElementById('statStatus').textContent = row?.meta.status || '-';
+      document.getElementById('statCompleteness').textContent = row ? `${computeCompleteness(row)}%` : '0%';
+    }
+
+    function renderTab() {
+      document.querySelectorAll('.tabbar button').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.tab === appState.activeTab);
+      });
+      const row = getSelectedRow();
+      const container = document.getElementById('tabContent');
+      if (!row) {
+        container.innerHTML = '<div class="empty">Pilih row terlebih dahulu.</div>';
         return;
       }
+      if (appState.activeTab === 'form') renderForm(container, row);
+      if (appState.activeTab === 'snippet') renderSnippet(container, row);
+      if (appState.activeTab === 'pitch') renderPitch(container, row);
+      if (appState.activeTab === 'json') renderJson(container, row);
+    }
 
-      const problems = Array.isArray(selected?.ontology?.problems) ? selected.ontology.problems : [];
-      const problemHtml = problems.length
-        ? `<div class="problem-stack">${problems.map((problem, idx) => `
-            <div class="problem-box">
-              <div class="problem-title">${escapeHtml((problem.id || `P${idx + 1}`) + '. ' + (problem.title || problem.label || 'Tanpa Judul Masalah'))}</div>
-              <div class="box-content" style="margin-top:10px;">${escapeHtml(problem.narrative || problem.description || 'Belum ada narasi detail.')}</div>
-              <div class="problem-meta">
-                ${problem.dimension ? `<span class="badge">Dimensi: ${escapeHtml(problem.dimension)}</span>` : ''}
-                ${problem.problem_type ? `<span class="badge">Tipe: ${escapeHtml(problem.problem_type)}</span>` : ''}
-              </div>
-            </div>
-          `).join('')}</div>`
-        : `<div class="muted">Belum ada narasi detail permasalahan pada struktur ontologi.</div>`;
+    function renderForm(container, row) {
+      const o = row.ontology;
+      container.innerHTML = '';
+      const sections = [
+        { key: 'identity', title: 'Identitas', render: () => renderIdentitySection(row) },
+        { key: 'problems', title: 'Permasalahan', render: () => renderMultiSection(row, 'problems') },
+        { key: 'activities', title: 'Kegiatan', render: () => renderMultiSection(row, 'activities') },
+        { key: 'stakeholders', title: 'Stakeholder', render: () => renderMultiSection(row, 'stakeholders') },
+        { key: 'investments', title: 'Investasi', render: () => renderMultiSection(row, 'investments') },
+        { key: 'beneficiary_output', title: 'Penerima Manfaat & Output', render: () => renderBeneficiaryOutput(row) },
+        { key: 'baseline', title: 'Kondisi Sebelum Program', render: () => renderRichSection(row, 'baseline') },
+        { key: 'outcomes', title: 'Outcome', render: () => renderRichSection(row, 'outcome') },
+        { key: 'indicators', title: 'Indikator Kuantitatif', render: () => renderMultiSection(row, 'indicators') },
+        { key: 'valuations', title: 'Monetisasi Sebelum Fiksasi', render: () => renderMultiSection(row, 'valuations') },
+        { key: 'adjustments', title: 'Fiksasi Dampak', render: () => renderAdjustmentSection(row) },
+        { key: 'final_values', title: 'Nilai Setelah Fiksasi & Informasi Umum', render: () => renderFinalSection(row) }
+      ];
+      sections.forEach(sec => {
+        const details = document.createElement('details');
+        details.className = 'section';
+        details.open = row.ui_state.expanded_sections?.[sec.key] ?? (['identity','problems'].includes(sec.key));
+        details.addEventListener('toggle', () => {
+          row.ui_state.expanded_sections[sec.key] = details.open;
+          saveState();
+        });
+        details.innerHTML = `<summary><span>${sec.title}</span><span class="pill">${sec.key}</span></summary><div class="section-body"></div>`;
+        details.querySelector('.section-body').appendChild(sec.render());
+        container.appendChild(details);
+      });
+      const note = document.createElement('div');
+      note.className = 'footer-note';
+      note.textContent = 'Catatan: ontology adalah source of truth. Tampilan kolom flat disinkronkan dari struktur ontology.';
+      container.appendChild(note);
+    }
 
-      const tableAccordion = groupedColumns.map(({ group, columns }) => `
-        <details class="table-group" ${group === 'Identitas' || group === 'Framing' ? 'open' : ''}>
-          <summary>${group}<span class="summary-arrow">›</span></summary>
-          <div style="overflow:auto;">
-            <table>
-              <thead>
-                <tr><th style="width:320px;">Kolom</th><th>Isi</th></tr>
-              </thead>
-              <tbody>
-                ${columns.map(col => `
-                  <tr>
-                    <td><strong>${escapeHtml(col.label)}</strong></td>
-                    <td>${selected[col.key] ? escapeHtml(selected[col.key]) : '<span class="muted">Belum diisi</span>'}</td>
-                  </tr>
-                `).join('')}
-              </tbody>
-            </table>
-          </div>
-        </details>
-      `).join('');
+    function renderIdentitySection(row) {
+      const wrap = document.createElement('div');
+      wrap.className = 'grid-2';
+      FIELD_SCHEMA.identity.forEach(f => {
+        const div = document.createElement('div');
+        div.className = 'field';
+        div.innerHTML = `<label>${f.label}</label><input value="${escapeAttr(row.ontology.identity[f.key] || '')}" />`;
+        div.querySelector('input').oninput = e => { row.ontology.identity[f.key] = e.target.value; touch(row); };
+        wrap.appendChild(div);
+      });
+      const status = document.createElement('div');
+      status.className = 'field';
+      status.innerHTML = `<label>Status</label><select><option value="draft">draft</option><option value="review">review</option><option value="final">final</option></select>`;
+      status.querySelector('select').value = row.meta.status;
+      status.querySelector('select').onchange = e => { row.meta.status = e.target.value; touch(row); };
+      wrap.appendChild(status);
+      return wrap;
+    }
 
-      root.innerHTML = `
-        <div class="detail-actions">
-          <button class="btn" id="editBtn">Edit</button>
-          <button class="btn danger" id="deleteBtn">Hapus</button>
+    function renderMultiSection(row, sectionName) {
+      const conf = FIELD_SCHEMA.multi[sectionName];
+      const list = row.ontology[sectionName];
+      const wrap = document.createElement('div');
+      const controls = document.createElement('div');
+      controls.className = 'row-actions';
+      const addBtn = document.createElement('button');
+      addBtn.textContent = `+ Tambah ${conf.itemLabel}`;
+      addBtn.className = 'success';
+      addBtn.onclick = () => {
+        const item = defaultItemForSection(sectionName);
+        list.push(item);
+        touch(row);
+      };
+      controls.appendChild(addBtn);
+      wrap.appendChild(controls);
+      wrap.appendChild(document.createElement('div')).className = 'divider';
+      if (!list.length) {
+        const empty = document.createElement('div');
+        empty.className = 'empty';
+        empty.textContent = `${conf.label} belum memiliki item.`;
+        wrap.appendChild(empty);
+        return wrap;
+      }
+      list.forEach((item, idx) => wrap.appendChild(renderItemCard(row, sectionName, conf, item, idx)));
+      return wrap;
+    }
+
+    function renderItemCard(row, sectionName, conf, item, idx) {
+      const card = document.createElement('div');
+      card.className = 'item-card';
+      card.innerHTML = `<h4><span>${escapeHtml(item.id || conf.itemLabel)}</span><span class="row-actions"><button data-act="up">↑</button><button data-act="down">↓</button><button data-act="delete" class="danger">Hapus</button></span></h4>`;
+      const actionWrap = card.querySelector('.row-actions');
+      actionWrap.querySelector('[data-act="up"]').onclick = () => moveItem(row.ontology[sectionName], idx, -1, row);
+      actionWrap.querySelector('[data-act="down"]').onclick = () => moveItem(row.ontology[sectionName], idx, 1, row);
+      actionWrap.querySelector('[data-act="delete"]').onclick = () => { row.ontology[sectionName].splice(idx, 1); touch(row); };
+      const body = document.createElement('div');
+      const grid = document.createElement('div');
+      grid.className = 'grid-2';
+      conf.fields.forEach(f => {
+        const field = document.createElement('div');
+        field.className = 'field';
+        const current = item[f.key];
+        const value = Array.isArray(current) ? current.join(', ') : (current ?? '');
+        let inputHtml = '';
+        if (f.type === 'textarea') inputHtml = `<textarea>${escapeHtml(value)}</textarea>`;
+        else if (f.type === 'select') inputHtml = `<select>${f.options.map(opt => `<option value="${escapeAttr(opt)}">${escapeHtml(opt)}</option>`).join('')}</select>`;
+        else inputHtml = `<input type="${f.type === 'number' ? 'number' : 'text'}" value="${escapeAttr(value)}" />`;
+        field.innerHTML = `<label>${f.label}</label>${inputHtml}`;
+        const el = field.querySelector('input, textarea, select');
+        if (f.type === 'select') el.value = value || f.options[0];
+        el.oninput = el.onchange = e => {
+          let v = e.target.value;
+          if (['addresses_problem_ids','related_activity_ids','target_beneficiary_ids'].includes(f.key)) v = splitList(v.replace(/\s+/g,''));
+          if (['normative_basis','evidence_basis'].includes(f.key)) v = splitList(v);
+          if (f.type === 'number') v = v === '' ? null : Number(v);
+          item[f.key] = v;
+          touch(row);
+        };
+        grid.appendChild(field);
+      });
+      body.appendChild(grid);
+      card.appendChild(body);
+      return card;
+    }
+
+    function renderBeneficiaryOutput(row) {
+      const wrap = document.createElement('div');
+      wrap.appendChild(renderMultiSection(row, 'beneficiaries'));
+      wrap.appendChild(document.createElement('div')).className = 'divider';
+      wrap.appendChild(renderMultiSection(row, 'outputs'));
+      return wrap;
+    }
+
+    function renderRichSection(row, group) {
+      const wrap = document.createElement('div');
+      const map = group === 'baseline'
+        ? FIELD_SCHEMA.rich.filter(x => x.key.startsWith('baseline_'))
+        : FIELD_SCHEMA.rich.filter(x => x.key.startsWith('outcome_'));
+      map.forEach(f => {
+        const field = document.createElement('div');
+        field.className = 'field';
+        const dimension = f.key.split('_').slice(1).join('_');
+        const collection = group === 'baseline' ? row.ontology.baselines : row.ontology.outcomes;
+        const item = collection.find(x => x.dimension === dimension) || createRichNode(group, dimension, row);
+        field.innerHTML = `<label>${f.label}</label><textarea>${escapeHtml(item.description || '')}</textarea>`;
+        field.querySelector('textarea').oninput = e => { item.description = e.target.value; touch(row); };
+        wrap.appendChild(field);
+      });
+      return wrap;
+    }
+
+    function createRichNode(group, dimension, row) {
+      const target = group === 'baseline' ? row.ontology.baselines : row.ontology.outcomes;
+      const node = {
+        id: uid(group === 'baseline' ? 'BL' : 'OC'),
+        dimension,
+        title: '',
+        description: '',
+        target_beneficiary_ids: []
+      };
+      target.push(node);
+      return node;
+    }
+
+    function renderAdjustmentSection(row) {
+      const wrap = document.createElement('div');
+      FIELD_SCHEMA.adjustmentTypes.forEach(conf => {
+        let item = row.ontology.impact_adjustments.find(x => x.type === conf.type);
+        if (!item) {
+          item = { id: uid(conf.type.slice(0,2).toUpperCase()), type: conf.type, justification_points: [], final_value: '' };
+          row.ontology.impact_adjustments.push(item);
+        }
+        const card = document.createElement('div');
+        card.className = 'item-card';
+        card.innerHTML = `<h4><span>${conf.label}</span><span class="pill">${item.id}</span></h4>`;
+        const just = document.createElement('div');
+        just.className = 'field';
+        just.innerHTML = `<label>Justifikasi Akademik / Analitis (satu poin per baris)</label><textarea>${escapeHtml((item.justification_points || []).join('\n'))}</textarea>`;
+        just.querySelector('textarea').oninput = e => { item.justification_points = e.target.value.split('\n').map(x=>x.trim()).filter(Boolean); touch(row); };
+        const val = document.createElement('div');
+        val.className = 'field';
+        val.innerHTML = `<label>Nilai Akhir (desimal 0–1 atau persentase desimal)</label><input type="number" step="0.01" min="0" max="1" value="${escapeAttr(item.final_value ?? '')}" />`;
+        val.querySelector('input').oninput = e => { item.final_value = e.target.value === '' ? '' : Number(e.target.value); autoRecalculateFinalValues(row); touch(row); };
+        card.appendChild(just);
+        card.appendChild(val);
+        wrap.appendChild(card);
+      });
+      return wrap;
+    }
+
+    function renderFinalSection(row) {
+      const wrap = document.createElement('div');
+      wrap.appendChild(renderMultiSection(row, 'final_values'));
+      wrap.appendChild(document.createElement('div')).className = 'divider';
+      const noteField = document.createElement('div');
+      noteField.className = 'field';
+      noteField.innerHTML = `<label>Kolom 45 — Informasi Umum</label><textarea>${escapeHtml(row.columns.col_45_informasi_umum || '')}</textarea>`;
+      noteField.querySelector('textarea').oninput = e => {
+        row.columns.col_45_informasi_umum = e.target.value;
+        row.ontology.notes = e.target.value.split(/\n{2,}/).map(t => t.trim()).filter(Boolean).map((t, i) => ({ id: `N${i+1}`, type: 'general', text: t }));
+        touch(row);
+      };
+      wrap.appendChild(noteField);
+      const helper = document.createElement('div');
+      helper.className = 'footer-note';
+      helper.textContent = 'Tip: nilai akhir dapat direkalkulasi otomatis dari monetisasi bruto + faktor fiksasi dampak jika sumber valuasi tersedia.';
+      wrap.appendChild(helper);
+      return wrap;
+    }
+
+    function autoRecalculateFinalValues(row) {
+      const o = row.ontology;
+      const dw = Number(o.impact_adjustments.find(x=>x.type==='deadweight')?.final_value || 0);
+      const ds = Number(o.impact_adjustments.find(x=>x.type==='displacement')?.final_value || 0);
+      const at = Number(o.impact_adjustments.find(x=>x.type==='attribution')?.final_value || 0);
+      const dr = Number(o.impact_adjustments.find(x=>x.type==='drop_off')?.final_value || 0);
+      const factor = (1-dw)*(1-ds)*(1-at);
+      o.final_values = o.valuations.map(v => ({
+        id: v.id.replace(/^M/i, 'FV'),
+        aspect: v.aspect,
+        source_monetisation_id: v.id,
+        value_2022: numOrNull(v.value_2022, factor, dr, 0),
+        value_2023: numOrNull(v.value_2023, factor, dr, 1),
+        value_2024: numOrNull(v.value_2024, factor, dr, 2),
+        calculation_logic: `gross × (1-${dw}) × (1-${ds}) × (1-${at}); tahun berikutnya × (1-${dr})`
+      }));
+    }
+
+    function numOrNull(base, factor, drop, yearsAfter) {
+      if (base === null || base === undefined || base === '') return null;
+      return Math.round(Number(base) * factor * Math.pow(1-drop, yearsAfter));
+    }
+
+    function renderSnippet(container, row) {
+      container.innerHTML = `
+        <div class="field"><label>Paste snippet JSON partial</label><textarea id="snippetInput" class="codebox" style="min-height:280px"></textarea></div>
+        <div class="snippet-controls">
+          <select id="snippetMode">
+            <option value="merge_by_id">merge_by_id</option>
+            <option value="append">append</option>
+            <option value="replace">replace</option>
+          </select>
+          <button id="previewSnippetBtn">Preview</button>
+          <button id="applySnippetBtn" class="success">Apply</button>
         </div>
-
-        <div class="hero-card">
-          <h2>${escapeHtml(selected.title || selected.sub_program || 'Tanpa Judul')}</h2>
-          <div class="badges">
-            <span class="badge">Program: ${escapeHtml(selected.program || '-')}</span>
-            <span class="badge">Sub-program: ${escapeHtml(selected.sub_program || '-')}</span>
-            <span class="badge">Lokasi: ${escapeHtml(selected.lokasi_pelaksanaan || '-')}</span>
-          </div>
-        </div>
-
-        <div class="section-stack">
-          ${sectionDetails('Framing Program', `
-            <div class="info-grid" style="margin-bottom:14px;">
-              ${infoBox('Permasalahan (Ringkas)', selected.permasalahan)}
-              ${infoBox('Penerima Manfaat', selected.penerima_manfaat)}
-            </div>
-            <div class="card" style="border-radius:22px; box-shadow:none; background:#f8fafc;">
-              <div class="panel-head" style="padding-bottom:12px;"><h3 class="panel-title" style="font-size:16px;">Narasi Detail Permasalahan</h3></div>
-              <div class="panel-body" style="padding-top:0;">${problemHtml}</div>
-            </div>
-          `, true)}
-
-          ${sectionDetails('Intervensi', `
-            <div class="info-grid">
-              ${infoBox('Kegiatan', [selected.kegiatan_tahun, selected.kegiatan_bentuk, selected.kegiatan_uraian].filter(Boolean).join(' • '))}
-              ${infoBox('Stakeholder', [selected.stakeholder_jenis, selected.stakeholder_peran].filter(Boolean).join(' • '))}
-              ${infoBox('Investasi', [selected.investasi_tahun, selected.investasi_bentuk, selected.investasi_nominal].filter(Boolean).join(' • '))}
-              ${infoBox('Output', selected.output)}
-            </div>
-          `, true)}
-
-          ${sectionDetails('Theory of Change Ringkas', `
-            <div class="flow-grid">
-              ${flowBox('Baseline', [selected.kondisi_sebelum_ekonomi, selected.kondisi_sebelum_sosial, selected.kondisi_sebelum_lingkungan, selected.kondisi_sebelum_wellbeing].filter(Boolean).join('\n\n'))}
-              ${flowBox('Output', selected.output)}
-              ${flowBox('Outcome', [selected.outcome_ekonomi, selected.outcome_sosial, selected.outcome_lingkungan, selected.outcome_wellbeing].filter(Boolean).join('\n\n'))}
-              ${flowBox('Indikator', [selected.indikator_ekonomi, selected.indikator_sosial, selected.indikator_lingkungan, selected.indikator_wellbeing].filter(Boolean).join('\n\n'))}
-            </div>
-          `)}
-
-          ${sectionDetails('SROI Snapshot', `
-            <div class="info-grid">
-              ${infoBox('Monetisasi Sebelum Fiksasi', [selected.monetisasi_aspek, selected.monetisasi_2022, selected.monetisasi_2023, selected.monetisasi_2024].filter(Boolean).join(' • '))}
-              ${infoBox('Fiksasi Dampak', [`Deadweight: ${selected.deadweight || '-'}`, `Attribution: ${selected.attribution || '-'}`, `Drop Off: ${selected.drop_off || '-'}`].join(' • '))}
-              ${infoBox('Nilai Final', [selected.nilai_monetisasi_aspek, selected.nilai_monetisasi_2022, selected.nilai_monetisasi_2023, selected.nilai_monetisasi_2024].filter(Boolean).join(' • '))}
-            </div>
-          `)}
-
-          ${sectionDetails('Struktur Data Ontologi', `<div class="json-box">${escapeHtml(JSON.stringify(selected.ontology, null, 2))}</div>`, true)}
-        </div>
-
-        <div class="card table-card">
-          <div class="panel-head"><h3 class="panel-title">Tabel 40 Kolom</h3></div>
-          <div class="panel-body">
-            <div class="accordion-stack">${tableAccordion}</div>
-          </div>
-        </div>
+        <div class="preview" id="snippetPreview">Preview akan muncul di sini.</div>
+        <div class="footer-note">Snippet mendukung partial update pada identity, problems, activities, stakeholders, investments, beneficiaries, outputs, baselines, outcomes, indicators, valuations, impact_adjustments, final_values, notes.</div>
       `;
-
-      document.getElementById('editBtn').addEventListener('click', () => openModal(selected.id));
-      document.getElementById('deleteBtn').addEventListener('click', () => deleteRecord(selected.id));
+      const input = container.querySelector('#snippetInput');
+      const preview = container.querySelector('#snippetPreview');
+      container.querySelector('#previewSnippetBtn').onclick = () => {
+        preview.textContent = buildSnippetPreview(row, input.value, container.querySelector('#snippetMode').value);
+      };
+      container.querySelector('#applySnippetBtn').onclick = () => {
+        try {
+          applySnippet(row, JSON.parse(input.value || '{}'), container.querySelector('#snippetMode').value);
+          preview.textContent = 'Snippet berhasil diterapkan.';
+          touch(row);
+        } catch (e) {
+          preview.textContent = 'Gagal memproses snippet: ' + e.message;
+        }
+      };
     }
 
-    function buildColumnForm() {
-      const root = document.getElementById('columnGroups');
-      root.innerHTML = groupedColumns.map(({ group, columns }) => `
-        <details class="group-box" open>
-          <summary>${group}</summary>
-          <div class="group-content">
-            <div class="form-grid">
-              ${columns.map(col => `
-                <div class="field">
-                  <label for="field-${col.key}">${escapeHtml(col.label)}</label>
-                  <textarea id="field-${col.key}" data-key="${col.key}"></textarea>
-                </div>
-              `).join('')}
-            </div>
-          </div>
-        </details>
-      `).join('');
-    }
-
-    function openModal(recordId = null) {
-      editingId = recordId;
-      const record = recordId ? records.find(r => r.id === recordId) : emptyRecord();
-      document.getElementById('modalTitle').textContent = recordId ? 'Edit Record' : 'Tambah Record';
-      document.getElementById('field-title').value = record.title || '';
-      document.getElementById('field-rowid').value = record.ontology?.row_id || '';
-      COLUMN_SCHEMA.forEach(col => {
-        const el = document.getElementById(`field-${col.key}`);
-        if (el) el.value = record[col.key] || '';
-      });
-      document.getElementById('ontologyText').value = JSON.stringify(record.ontology || emptyOntology(), null, 2);
-      document.getElementById('recordModal').classList.add('open');
-      setActiveTab('columns');
-    }
-
-    function closeModal() {
-      document.getElementById('recordModal').classList.remove('open');
-      editingId = null;
-    }
-
-    function setActiveTab(tab) {
-      document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.toggle('active', btn.dataset.tab === tab));
-      document.getElementById('tab-columns').classList.toggle('active', tab === 'columns');
-      document.getElementById('tab-ontology').classList.toggle('active', tab === 'ontology');
-    }
-
-    function saveRecord() {
-      let ontology;
+    function buildSnippetPreview(row, raw, mode) {
       try {
-        ontology = JSON.parse(document.getElementById('ontologyText').value || '{}');
-      } catch {
-        alert('JSON ontologi belum valid.');
-        return;
+        const data = JSON.parse(raw || '{}');
+        const sections = Object.keys(data).filter(k => k !== 'row_id');
+        if (!sections.length) return 'Tidak ada section yang terdeteksi.';
+        const lines = [`Mode: ${mode}`, `Target row: ${row.id}`, 'Sections:'];
+        sections.forEach(sec => {
+          const current = row.ontology[sec];
+          const incoming = data[sec];
+          if (Array.isArray(current) && Array.isArray(incoming)) {
+            lines.push(`- ${sec}: current ${current.length} item → incoming ${incoming.length} item`);
+          } else if (typeof current === 'object' && typeof incoming === 'object') {
+            lines.push(`- ${sec}: object patch`);
+          } else {
+            lines.push(`- ${sec}: scalar patch`);
+          }
+        });
+        return lines.join('\n');
+      } catch (e) {
+        return 'JSON tidak valid: ' + e.message;
       }
+    }
 
-      let record = editingId ? records.find(r => r.id === editingId) : emptyRecord();
-      if (!record) record = emptyRecord();
-
-      record.title = document.getElementById('field-title').value.trim();
-      record.ontology = ontology;
-      record.ontology.row_id = document.getElementById('field-rowid').value.trim();
-      record.updated_at = new Date().toISOString();
-      COLUMN_SCHEMA.forEach(col => {
-        const el = document.getElementById(`field-${col.key}`);
-        record[col.key] = el ? el.value : '';
+    function applySnippet(row, data, mode) {
+      const allowed = ['identity','problems','activities','stakeholders','investments','beneficiaries','outputs','baselines','outcomes','indicators','valuations','impact_adjustments','final_values','notes'];
+      allowed.forEach(sec => {
+        if (!(sec in data)) return;
+        const incoming = data[sec];
+        if (sec === 'identity' && typeof incoming === 'object' && !Array.isArray(incoming)) {
+          row.ontology.identity = { ...row.ontology.identity, ...incoming };
+          return;
+        }
+        if (!Array.isArray(incoming)) return;
+        if (!Array.isArray(row.ontology[sec])) row.ontology[sec] = [];
+        if (mode === 'replace') {
+          row.ontology[sec] = incoming;
+        } else if (mode === 'append') {
+          row.ontology[sec].push(...incoming);
+        } else if (mode === 'merge_by_id') {
+          incoming.forEach(item => {
+            const idx = row.ontology[sec].findIndex(x => x.id && item.id && x.id === item.id);
+            if (idx >= 0) row.ontology[sec][idx] = { ...row.ontology[sec][idx], ...item };
+            else row.ontology[sec].push(item);
+          });
+        }
       });
-      record.title = record.title || record.sub_program || record.program || 'Tanpa Judul';
-
-      const exists = records.some(r => r.id === record.id);
-      records = exists ? records.map(r => r.id === record.id ? record : r) : [record, ...records];
-      selectedId = record.id;
-      persist();
-      closeModal();
-      renderApp();
+      autoRecalculateFinalValues(row);
     }
 
-    function deleteRecord(id) {
-      if (!confirm('Hapus record ini?')) return;
-      records = records.filter(r => r.id !== id);
-      if (selectedId === id) selectedId = records[0]?.id || null;
-      persist();
-      renderApp();
+    function renderPitch(container, row) {
+      const o = row.ontology;
+      container.innerHTML = '';
+      const sections = [
+        ['Identitas', renderPitchIdentity(o)],
+        ['Permasalahan', renderPitchList(o.problems, ['id','title','description'])],
+        ['Kegiatan', renderPitchList(o.activities, ['id','title','year','form','description'])],
+        ['Stakeholder', renderPitchList(o.stakeholders, ['id','name','jenis','role'])],
+        ['Investasi', renderPitchList(o.investments, ['id','year','form','amount','description'])],
+        ['Penerima Manfaat', renderPitchList(o.beneficiaries, ['id','name','type','count','description'])],
+        ['Output', renderPitchList(o.outputs, ['id','title','description'])],
+        ['Baseline', renderPitchBaselineOutcome(o.baselines)],
+        ['Outcome', renderPitchBaselineOutcome(o.outcomes)],
+        ['Indikator', renderPitchList(o.indicators, ['id','dimension','title','unit','measurement_method'])],
+        ['Monetisasi Sebelum Fiksasi', renderPitchList(o.valuations, ['id','aspect','proxy_label','proxy_value','value_2022','value_2023','value_2024'])],
+        ['Fiksasi Dampak', renderPitchAdjustments(o.impact_adjustments)],
+        ['Nilai Setelah Fiksasi', renderPitchList(o.final_values, ['id','aspect','value_2022','value_2023','value_2024','calculation_logic'])],
+        ['Informasi Umum', renderPitchNotes(o.notes)]
+      ];
+      sections.forEach(([title, html]) => {
+        const details = document.createElement('details');
+        details.className = 'section'; details.open = true;
+        details.innerHTML = `<summary><span>${title}</span></summary><div class="section-body">${html}</div>`;
+        container.appendChild(details);
+      });
     }
 
-    function exportJson() {
-      const blob = new Blob([JSON.stringify(records, null, 2)], { type: 'application/json' });
+    function renderPitchIdentity(o) {
+      return `
+        <div class="pitch-card"><h3>${escapeHtml(o.identity.sub_program || '-')}</h3>
+        <div class="grid-2">
+          <div><div class="small">Program</div><div>${escapeHtml(o.identity.program || '-')}</div></div>
+          <div><div class="small">Unit Kerja</div><div>${escapeHtml(o.identity.unit_kerja || '-')}</div></div>
+          <div><div class="small">Lokasi</div><div>${escapeHtml(o.identity.lokasi || '-')}</div></div>
+          <div><div class="small">Nama CDO</div><div>${escapeHtml(o.identity.cdo_name || '-')}</div></div>
+        </div></div>`;
+    }
+
+    function renderPitchList(items, keys) {
+      if (!items?.length) return '<div class="empty">Belum ada data.</div>';
+      return items.map(it => `<div class="pitch-card">${keys.map(k => `<div><span class="small">${escapeHtml(k)}</span><div>${formatPitchValue(it[k])}</div></div>`).join('<div class="divider"></div>')}</div>`).join('');
+    }
+
+    function renderPitchBaselineOutcome(items) {
+      if (!items?.length) return '<div class="empty">Belum ada data.</div>';
+      return items.map(it => `<div class="pitch-card"><div class="chips"><span class="chip">${escapeHtml(it.id || '-')}</span><span class="chip">${escapeHtml(it.dimension || '-')}</span></div><div class="divider"></div><div>${escapeHtml(it.description || '-')}</div></div>`).join('');
+    }
+
+    function renderPitchAdjustments(items) {
+      if (!items?.length) return '<div class="empty">Belum ada data.</div>';
+      return items.map(it => `<div class="pitch-card"><h3>${escapeHtml(it.type)}</h3><div class="small">Nilai</div><div>${it.final_value === '' ? '-' : it.final_value}</div><div class="divider"></div>${(it.justification_points || []).length ? '<ul>' + it.justification_points.map(p => `<li>${escapeHtml(p)}</li>`).join('') + '</ul>' : '<div class="muted">Belum ada justifikasi.</div>'}</div>`).join('');
+    }
+
+    function renderPitchNotes(items) {
+      if (!items?.length) return '<div class="empty">Belum ada catatan.</div>';
+      return items.map(it => `<div class="pitch-card"><div class="small">${escapeHtml(it.type || 'note')}</div><div>${escapeHtml(it.text || '')}</div></div>`).join('');
+    }
+
+    function formatPitchValue(v) {
+      if (v === null || v === undefined || v === '') return '-';
+      if (Array.isArray(v)) return escapeHtml(v.join(', '));
+      if (typeof v === 'number' && String(v).length >= 4) return formatMoney(v);
+      return escapeHtml(String(v));
+    }
+
+    function renderJson(container, row) {
+      container.innerHTML = `
+        <div class="json-actions">
+          <button id="copyJsonBtn">Copy JSON Row</button>
+          <button id="downloadRowBtn">Download JSON Row</button>
+        </div>
+        <textarea class="codebox" id="jsonBox">${escapeHtml(JSON.stringify(row, null, 2))}</textarea>
+        <div class="footer-note">Mode ini menampilkan seluruh row, termasuk meta, columns, ontology, dan ui_state.</div>
+      `;
+      container.querySelector('#copyJsonBtn').onclick = async () => {
+        await navigator.clipboard.writeText(container.querySelector('#jsonBox').value);
+      };
+      container.querySelector('#downloadRowBtn').onclick = () => downloadJson(`${row.id}.json`, row);
+    }
+
+    function defaultItemForSection(sectionName) {
+      const map = {
+        problems: { id: uid('P'), title: '', dimension: 'general', description: '', normative_basis: [], evidence_basis: [] },
+        activities: { id: uid('A'), year: '', form: '', title: '', description: '', addresses_problem_ids: [] },
+        stakeholders: { id: uid('S'), name: '', jenis: '', role: '', related_activity_ids: [] },
+        investments: { id: uid('INV'), year: '', form: '', amount: null, currency: 'IDR', description: '', related_activity_ids: [] },
+        beneficiaries: { id: uid('B'), name: '', type: 'direct', count: null, unit: 'orang', description: '' },
+        outputs: { id: uid('O'), title: '', description: '', related_activity_ids: [], target_beneficiary_ids: [] },
+        indicators: { id: uid('I'), dimension: 'economic', title: '', description: '', unit: '', measurement_method: '', related_outcome_id: '' },
+        valuations: { id: uid('M'), aspect: '', related_indicator_id: '', proxy_label: '', proxy_value: null, beneficiary_count: null, value_2022: null, value_2023: null, value_2024: null, calculation_logic: '' },
+        final_values: { id: uid('FV'), aspect: '', source_monetisation_id: '', value_2022: null, value_2023: null, value_2024: null, calculation_logic: '' },
+        notes: { id: uid('N'), type: 'general', text: '' }
+      };
+      return structuredClone(map[sectionName]);
+    }
+
+    function moveItem(arr, idx, dir, row) {
+      const n = idx + dir;
+      if (n < 0 || n >= arr.length) return;
+      [arr[idx], arr[n]] = [arr[n], arr[idx]];
+      touch(row);
+    }
+
+    function escapeHtml(str) {
+      return String(str ?? '').replace(/[&<>"']/g, s => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[s]));
+    }
+    function escapeAttr(str) { return escapeHtml(str); }
+
+    function downloadJson(name, data) {
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
-      a.href = url;
-      a.download = 'tjsl-csv-records.json';
-      a.click();
+      a.href = url; a.download = name; a.click();
       URL.revokeObjectURL(url);
     }
 
-    function importJson(file) {
-      if (!file) return;
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        try {
-          const parsed = JSON.parse(e.target.result);
-          if (!Array.isArray(parsed)) throw new Error();
-          records = parsed;
-          selectedId = records[0]?.id || null;
-          persist();
-          renderApp();
-        } catch {
-          alert('File JSON tidak valid.');
-        }
-      };
-      reader.readAsText(file);
-    }
+    document.getElementById('addRowBtn').onclick = () => {
+      const row = defaultRow();
+      appState.rows.unshift(row);
+      appState.selectedId = row.id;
+      saveState(); renderAll();
+    };
+    document.getElementById('duplicateRowBtn').onclick = () => {
+      const row = getSelectedRow(); if (!row) return;
+      const copy = structuredClone(row); copy.id = uid('ROW'); copy.meta.created_at = new Date().toISOString(); copy.meta.updated_at = copy.meta.created_at; copy.meta.version = 1;
+      appState.rows.unshift(copy); appState.selectedId = copy.id; saveState(); renderAll();
+    };
+    document.getElementById('deleteRowBtn').onclick = () => {
+      const row = getSelectedRow(); if (!row) return;
+      if (!confirm(`Hapus row ${row.id}?`)) return;
+      appState.rows = appState.rows.filter(r => r.id !== row.id);
+      appState.selectedId = appState.rows[0]?.id || null;
+      if (!appState.rows.length) { const fresh = defaultRow(); appState.rows = [fresh]; appState.selectedId = fresh.id; }
+      saveState(); renderAll();
+    };
+    document.getElementById('exportAllBtn').onclick = () => downloadJson('tjsl_ontology_rows.json', appState.rows);
+    document.getElementById('importAllBtn').onclick = () => document.getElementById('importAllFile').click();
+    document.getElementById('importAllFile').addEventListener('change', async (e) => {
+      const file = e.target.files[0]; if (!file) return;
+      const text = await file.text();
+      try {
+        const data = JSON.parse(text);
+        if (!Array.isArray(data)) throw new Error('File harus berupa array rows');
+        appState.rows = data; appState.selectedId = data[0]?.id || null; saveState(); renderAll();
+      } catch (err) { alert('Import gagal: ' + err.message); }
+      e.target.value = '';
+    });
+    document.getElementById('searchInput').addEventListener('input', renderRowList);
+    document.querySelectorAll('.tabbar button').forEach(btn => btn.onclick = () => { appState.activeTab = btn.dataset.tab; renderTab(); });
 
-    function escapeHtml(value) {
-      return String(value ?? '')
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#039;');
-    }
-
-    function renderApp() {
-      const filtered = getFilteredRecords();
-      const selected = getSelectedRecord(filtered);
-      if (!selectedId && selected) selectedId = selected.id;
-      renderStats();
-      renderRecordList(filtered, selected);
-      renderDetail(selected);
-    }
-
-    function bindEvents() {
-      document.getElementById('searchInput').addEventListener('input', (e) => {
-        query = e.target.value;
-        renderApp();
-      });
-      document.getElementById('addBtn').addEventListener('click', () => openModal());
-      document.getElementById('exportBtn').addEventListener('click', exportJson);
-      document.getElementById('importInput').addEventListener('change', (e) => importJson(e.target.files?.[0]));
-      document.getElementById('closeModalBtn').addEventListener('click', closeModal);
-      document.getElementById('cancelBtn').addEventListener('click', closeModal);
-      document.getElementById('saveBtn').addEventListener('click', saveRecord);
-      document.querySelectorAll('.tab-btn').forEach(btn => btn.addEventListener('click', () => setActiveTab(btn.dataset.tab)));
-      document.getElementById('field-rowid').addEventListener('input', (e) => {
-        try {
-          const obj = JSON.parse(document.getElementById('ontologyText').value || '{}');
-          obj.row_id = e.target.value;
-          document.getElementById('ontologyText').value = JSON.stringify(obj, null, 2);
-        } catch {}
-      });
-      document.getElementById('recordModal').addEventListener('click', (e) => {
-        if (e.target.id === 'recordModal') closeModal();
-      });
-    }
-
-    buildColumnForm();
-    loadRecords();
-    bindEvents();
-    renderApp();
+    loadState();
+    appState.rows.forEach(syncColumnsFromOntology);
+    renderAll();
   </script>
 </body>
 </html>
