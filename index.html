@@ -569,6 +569,17 @@
     .nlp-node.inferred { border-color:#cbd9ff; background:#eef4ff; }
     .nlp-node.partial { border-color:#fed7aa; background:#fff7ed; }
     .nlp-node.conflict { border-color:#fecaca; background:#fef2f2; }
+    .nlp-node.needs-review { border-color:#fde68a; background:#fefce8; }
+    .nlp-node-badges { display:flex; gap:4px; flex-wrap:wrap; margin-top:8px; }
+    .nlp-node-badge { display:inline-flex; align-items:center; gap:3px; padding:3px 7px; border-radius:999px; font-size:10px; font-weight:800; cursor:pointer; border:1px solid transparent; transition:160ms; user-select:none; }
+    .nlp-node-badge.confirmed { background:#ecfdf3; color:#15803d; border-color:#bbf7d0; }
+    .nlp-node-badge.confirmed:hover { background:#bbf7d0; }
+    .nlp-node-badge.locked { background:#eff6ff; color:#1d4ed8; border-color:#bfdbfe; }
+    .nlp-node-badge.locked:hover { background:#bfdbfe; }
+    .nlp-node-badge.needs-review { background:#fefce8; color:#b45309; border-color:#fde68a; }
+    .nlp-node-badge.needs-review:hover { background:#fde68a; }
+    .nlp-node-badge.unlocked { background:#f8fafc; color:#64748b; border-color:#e2e8f0; }
+    .nlp-node-badge.unlocked:hover { background:#e2e8f0; }
     .nlp-issue-grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:12px; }
     .nlp-issue-box { border:1px solid var(--border); border-radius:14px; padding:12px; }
     .nlp-issue-box.warn { background:#fffaf5; border-color:#fde7c4; }
@@ -2974,6 +2985,17 @@
     document.getElementById('closeModalBtn').addEventListener('click', closeOntologyModal);
     document.getElementById('cancelBtn').addEventListener('click', closeOntologyModal);
     nlpRestoreApiKey();
+    // Step 4: event delegation for node badge clicks in right panel
+    document.getElementById('nlpDraftContent').addEventListener('click', function(e) {
+      var badge = e.target.closest('[data-action]');
+      if (!badge) return;
+      var action = badge.dataset.action;
+      var nodeId = badge.dataset.id;
+      var colName = badge.dataset.col;
+      if (action === 'review')  nlpClearNeedsReview(nodeId, colName);
+      if (action === 'lock')    nlpToggleNodeLock(nodeId, colName);
+      if (action === 'confirm') nlpToggleNodeConfirm(nodeId, colName);
+    });
     document.getElementById('nlpComposer').addEventListener('keydown', function(e) {
       if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); nlpSend(); }
     });
@@ -3123,6 +3145,423 @@
   var nlpCurrentDraft = null;
   var nlpConfidenceNotes = [];
 
+
+  // ── _ctx Builder ──────────────────────────────
+  // Builds context metadata (_ctx) for every node in the ontology
+  // by traversing relation_index. Mutates ont in-place, returns ont.
+
+  function nlpBuildCtx(ont, turnNumber) {
+    if (!ont || !ont.relation_index) return ont;
+    var ri = ont.relation_index;
+
+    // Helper: get all nodes as flat map id -> node
+    function nodeMap() {
+      var m = {};
+      var collections = [
+        'problem_nodes','activity_nodes','stakeholder_nodes',
+        'beneficiary_nodes','output_templates','output_delivery_nodes',
+        'baseline_nodes','outcome_nodes','indicator_nodes',
+        'monetisation_pre_fix_nodes','impact_adjustment_nodes',
+        'final_value_nodes'
+      ];
+      collections.forEach(function(col) {
+        (ont[col]||[]).forEach(function(n) { if (n && n.id) m[n.id] = { node: n, col: col }; });
+      });
+      return m;
+    }
+
+    // Helper: chain_role from collection name
+    function roleFromCol(col) {
+      var map = {
+        problem_nodes: 'problem',
+        activity_nodes: 'activity',
+        stakeholder_nodes: 'stakeholder',
+        beneficiary_nodes: 'beneficiary',
+        output_templates: 'output_template',
+        output_delivery_nodes: 'output_delivery',
+        baseline_nodes: 'baseline',
+        outcome_nodes: 'outcome',
+        indicator_nodes: 'indicator',
+        monetisation_pre_fix_nodes: 'monetisation',
+        impact_adjustment_nodes: 'adjustment',
+        final_value_nodes: 'final_value'
+      };
+      return map[col] || col;
+    }
+
+    // Build reverse index: for each node id, what upstream nodes point to it
+    function buildReverseIndex() {
+      var rev = {};
+      Object.keys(ri).forEach(function(relKey) {
+        var relMap = ri[relKey];
+        if (!relMap || typeof relMap !== 'object') return;
+        Object.keys(relMap).forEach(function(fromId) {
+          var toIds = relMap[fromId];
+          if (!Array.isArray(toIds)) return;
+          toIds.forEach(function(toId) {
+            if (!rev[toId]) rev[toId] = [];
+            if (rev[toId].indexOf(fromId) === -1) rev[toId].push(fromId);
+          });
+        });
+      });
+      return rev;
+    }
+
+    // Build forward index: for each node id, what downstream nodes it points to
+    function buildForwardIndex() {
+      var fwd = {};
+      Object.keys(ri).forEach(function(relKey) {
+        var relMap = ri[relKey];
+        if (!relMap || typeof relMap !== 'object') return;
+        Object.keys(relMap).forEach(function(fromId) {
+          var toIds = relMap[fromId];
+          if (!Array.isArray(toIds)) return;
+          if (!fwd[fromId]) fwd[fromId] = [];
+          toIds.forEach(function(toId) {
+            if (fwd[fromId].indexOf(toId) === -1) fwd[fromId].push(toId);
+          });
+        });
+      });
+      return fwd;
+    }
+
+    // Trace full pathway string from root to a node (BFS upstream)
+    function tracePathway(nodeId, revIdx, nm) {
+      var visited = {};
+      var queue = [nodeId];
+      var paths = {};
+      paths[nodeId] = nodeId;
+      // Walk upstream iteratively
+      var limit = 20;
+      while (queue.length && limit-- > 0) {
+        var cur = queue.shift();
+        if (visited[cur]) continue;
+        visited[cur] = true;
+        var ups = revIdx[cur] || [];
+        ups.forEach(function(up) {
+          if (!visited[up]) {
+            paths[up] = paths[up] || up;
+            paths[cur] = paths[up] + ' \u2192 ' + cur;
+            queue.push(up);
+          }
+        });
+      }
+      return paths[nodeId] || nodeId;
+    }
+
+    // Find siblings: nodes at same chain_role that share an upstream parent
+    function findSiblings(nodeId, col, revIdx, fwdIdx, nm) {
+      var siblings = [];
+      var ups = revIdx[nodeId] || [];
+      ups.forEach(function(upId) {
+        var downs = fwdIdx[upId] || [];
+        downs.forEach(function(downId) {
+          if (downId !== nodeId && nm[downId]) {
+            var downCol = nm[downId].col;
+            if (downCol === col && siblings.indexOf(downId) === -1) {
+              siblings.push(downId);
+            }
+          }
+        });
+      });
+      return siblings;
+    }
+
+    var nm = nodeMap();
+    var revIdx = buildReverseIndex();
+    var fwdIdx = buildForwardIndex();
+
+    // Now attach _ctx to every node
+    Object.keys(nm).forEach(function(id) {
+      var entry = nm[id];
+      var node = entry.node;
+      var col = entry.col;
+
+      var upstream = revIdx[id] || [];
+      var downstream = fwdIdx[id] || [];
+      var siblings = findSiblings(id, col, revIdx, fwdIdx, nm);
+      var pathway = tracePathway(id, revIdx, nm);
+
+      // Preserve existing _ctx fields (confirmed, locked, change_log, origin_turn)
+      var existing = node._ctx || {};
+
+      node._ctx = {
+        chain_role:        roleFromCol(col),
+        upstream:          upstream,
+        downstream:        downstream,
+        siblings:          siblings,
+        pathway:           pathway,
+        confirmed:         existing.confirmed  || false,
+        locked:            existing.locked     || false,
+        needs_review:      existing.needs_review || false,
+        origin_turn:       existing.origin_turn !== undefined ? existing.origin_turn : (turnNumber || 0),
+        last_modified_turn:turnNumber || existing.last_modified_turn || 0,
+        change_log:        existing.change_log || []
+      };
+    });
+
+    return ont;
+  }
+
+  // Diff two ontology snapshots and record changes in _ctx.change_log
+  function nlpDiffAndLog(prevOnt, nextOnt, turnNumber) {
+    if (!prevOnt || !nextOnt) return nextOnt;
+    var collections = [
+      'problem_nodes','activity_nodes','stakeholder_nodes',
+      'beneficiary_nodes','output_delivery_nodes','baseline_nodes',
+      'outcome_nodes','indicator_nodes','monetisation_pre_fix_nodes',
+      'impact_adjustment_nodes','final_value_nodes'
+    ];
+    collections.forEach(function(col) {
+      var prevNodes = {};
+      (prevOnt[col]||[]).forEach(function(n){ if(n&&n.id) prevNodes[n.id] = n; });
+      (nextOnt[col]||[]).forEach(function(n) {
+        if (!n || !n.id) return;
+        var prev = prevNodes[n.id];
+        if (!n._ctx) n._ctx = {};
+        if (!n._ctx.change_log) n._ctx.change_log = [];
+        if (!prev) {
+          // New node
+          n._ctx.change_log.push({ turn: turnNumber, event: 'created' });
+          n._ctx.origin_turn = turnNumber;
+        } else {
+          // Check if key fields changed
+          var changed = false;
+          var watchFields = ['label','description','dimension','indicator','aspect','proxy_basis'];
+          watchFields.forEach(function(f) {
+            if (prev[f] !== n[f] && (prev[f] || n[f])) changed = true;
+          });
+          if (changed) {
+            n._ctx.change_log.push({ turn: turnNumber, event: 'modified' });
+            n._ctx.last_modified_turn = turnNumber;
+            // Flag downstream as needs_review
+            if (n._ctx.downstream && n._ctx.downstream.length) {
+              n._ctx.needs_review_downstream = true;
+            }
+          }
+        }
+      });
+    });
+    return nextOnt;
+  }
+
+  // Flag downstream nodes as needs_review when an upstream node changes
+  function nlpFlagDownstream(ont) {
+    if (!ont) return ont;
+    var allNodes = {};
+    var collections = [
+      'problem_nodes','activity_nodes','output_delivery_nodes',
+      'outcome_nodes','indicator_nodes','monetisation_pre_fix_nodes',
+      'impact_adjustment_nodes','final_value_nodes'
+    ];
+    collections.forEach(function(col) {
+      (ont[col]||[]).forEach(function(n){ if(n&&n.id) allNodes[n.id] = n; });
+    });
+    // Walk: if node has needs_review_downstream, flag all its downstream
+    Object.keys(allNodes).forEach(function(id) {
+      var node = allNodes[id];
+      if (node._ctx && node._ctx.needs_review_downstream) {
+        (node._ctx.downstream||[]).forEach(function(downId) {
+          var dn = allNodes[downId];
+          if (dn) {
+            if (!dn._ctx) dn._ctx = {};
+            dn._ctx.needs_review = true;
+          }
+        });
+        delete node._ctx.needs_review_downstream;
+      }
+    });
+    return ont;
+  }
+
+
+  // ── Step 2: Graph Summary Injector ───────────────────────────
+  // Serializes _ctx of all nodes into a compact text block for system prompt injection
+
+  function nlpBuildGraphSummary(ont) {
+    if (!ont) return '';
+    var lines = [];
+    var collections = [
+      { col: 'problem_nodes',               role: 'MASALAH' },
+      { col: 'activity_nodes',              role: 'AKTIVITAS' },
+      { col: 'output_delivery_nodes',       role: 'OUTPUT' },
+      { col: 'beneficiary_nodes',           role: 'PENERIMA MANFAAT' },
+      { col: 'outcome_nodes',               role: 'OUTCOME' },
+      { col: 'indicator_nodes',             role: 'INDIKATOR' },
+      { col: 'monetisation_pre_fix_nodes',  role: 'MONETISASI' },
+      { col: 'impact_adjustment_nodes',     role: 'ADJUSTMENT' },
+      { col: 'final_value_nodes',           role: 'FINAL VALUE' }
+    ];
+    collections.forEach(function(def) {
+      var nodes = ont[def.col] || [];
+      nodes.forEach(function(n) {
+        if (!n || !n.id) return;
+        var ctx = n._ctx || {};
+        var flags = [];
+        if (ctx.confirmed) flags.push('CONFIRMED');
+        if (ctx.locked)    flags.push('LOCKED');
+        if (ctx.needs_review) flags.push('NEEDS_REVIEW');
+        var label = n.label || n.description || n.indicator || n.aspect || n.id;
+        var line = '[' + def.role + '] ' + n.id + ': "' + String(label).slice(0, 80) + '"';
+        if (flags.length) line += ' [' + flags.join(',') + ']';
+        if (ctx.pathway)   line += '\n  pathway: ' + ctx.pathway;
+        if (ctx.upstream && ctx.upstream.length)   line += '\n  upstream: ' + ctx.upstream.join(', ');
+        if (ctx.downstream && ctx.downstream.length) line += '\n  downstream: ' + ctx.downstream.join(', ');
+        if (ctx.siblings && ctx.siblings.length)   line += '\n  siblings: ' + ctx.siblings.join(', ');
+        if (ctx.change_log && ctx.change_log.length) {
+          var last = ctx.change_log[ctx.change_log.length - 1];
+          line += '\n  last_change: turn ' + last.turn + ' [' + last.event + ']';
+        }
+        lines.push(line);
+      });
+    });
+    return lines.join('\n\n');
+  }
+
+  // ── Step 2b: Separate history into narasi-only for API messages ──
+  // nlpHistoryNarasi: array of {role, content} with only narrative text (no JSON blobs)
+  // This keeps API messages lightweight while full context comes via system prompt
+  var nlpHistoryNarasi = [];
+
+  function nlpExtractNarasi(fullResponse) {
+    var sep = '---JSON---';
+    var idx = fullResponse.indexOf(sep);
+    return idx !== -1 ? fullResponse.slice(0, idx).trim() : fullResponse.trim();
+  }
+
+  // ── Step 2c: Enhanced system prompt with injected state ──────
+  function nlpGetSystemPromptWithState() {
+    var base = nlpGetSystemPrompt();
+    var stateParts = [];
+
+    // Inject current ontology state (compact — key fields only, no _ctx noise)
+    if (nlpCurrentDraft) {
+      var stateClean = nlpStripCtxForPrompt(nlpCurrentDraft);
+      stateParts.push(
+        'STATE ONTOLOGI SAAT INI (gunakan sebagai BASE \xe2\x80\x94 jangan generate dari nol):\n' + JSON.stringify(stateClean, null, 2)
+      );
+    }
+
+    // Inject graph awareness summary
+    if (nlpCurrentDraft) {
+      var graph = nlpBuildGraphSummary(nlpCurrentDraft);
+      if (graph) {
+        stateParts.push(
+          'GRAPH AWARENESS — posisi dan relasi setiap node:\n' + graph
+        );
+      }
+    }
+
+    // Inject carry-forward rules
+    if (nlpCurrentDraft) {
+      var needsReview = [];
+      var locked = [];
+      var collections = [
+        'problem_nodes','activity_nodes','output_delivery_nodes','outcome_nodes',
+        'indicator_nodes','monetisation_pre_fix_nodes','impact_adjustment_nodes','final_value_nodes'
+      ];
+      collections.forEach(function(col) {
+        (nlpCurrentDraft[col]||[]).forEach(function(n) {
+          if (!n || !n._ctx) return;
+          if (n._ctx.needs_review) needsReview.push(n.id);
+          if (n._ctx.locked) locked.push(n.id);
+        });
+      });
+
+      var rules = 'ATURAN CARRY FORWARD:\n' +
+        '- Node LOCKED (' + (locked.length ? locked.join(', ') : 'belum ada') + '): JANGAN ubah sama sekali\n' +
+        '- Node NEEDS_REVIEW (' + (needsReview.length ? needsReview.join(', ') : 'tidak ada') + '): ' +
+          'upstream-nya baru diubah — review apakah masih konsisten\n' +
+        '- Node yang TIDAK disebut user dalam pesan ini: PERTAHANKAN persis seperti state\n' +
+        '- Jika user mengubah node yang punya downstream: tandai downstream sebagai needs_review ' +
+          'dalam ontology_json output\n' +
+        '- Sibling nodes: jika satu sibling diubah, periksa konsistensi sibling lain dan ' +
+          'sebutkan dalam narasi jika ada potensi konflik';
+
+      stateParts.push(rules);
+    }
+
+    if (stateParts.length === 0) return base;
+    return base + '\n\n---STATE---\n' + stateParts.join('\n\n---\n');
+  }
+
+  // Strip _ctx from ontology before sending to prompt (avoid token bloat from metadata)
+  // but keep status and key fields
+  function nlpStripCtxForPrompt(ont) {
+    if (!ont) return ont;
+    var cleaned = JSON.parse(JSON.stringify(ont));
+    var collections = [
+      'problem_nodes','activity_nodes','stakeholder_nodes','beneficiary_nodes',
+      'output_templates','output_delivery_nodes','baseline_nodes','outcome_nodes',
+      'indicator_nodes','monetisation_pre_fix_nodes','impact_adjustment_nodes','final_value_nodes'
+    ];
+    collections.forEach(function(col) {
+      (cleaned[col]||[]).forEach(function(n) {
+        if (n && n._ctx) {
+          // Keep only the flags AI needs to know, drop verbose pathway/change_log
+          n._ctx = {
+            confirmed:    n._ctx.confirmed,
+            locked:       n._ctx.locked,
+            needs_review: n._ctx.needs_review,
+            chain_role:   n._ctx.chain_role,
+            upstream:     n._ctx.upstream,
+            downstream:   n._ctx.downstream,
+            siblings:     n._ctx.siblings
+          };
+        }
+      });
+    });
+    return cleaned;
+  }
+
+
+  // ── Step 3: History split — user push updated ────────────────
+  // nlpHistoryNarasi is used for API messages (lightweight)
+  // nlpHistory keeps full responses for internal reference
+
+  // ── Step 4: Lock / Confirm node toggle ───────────────────────
+  function nlpColForNode(ont, nodeId) {
+    var collections = [
+      'problem_nodes','activity_nodes','stakeholder_nodes','beneficiary_nodes',
+      'output_templates','output_delivery_nodes','baseline_nodes','outcome_nodes',
+      'indicator_nodes','monetisation_pre_fix_nodes','impact_adjustment_nodes','final_value_nodes'
+    ];
+    for (var i = 0; i < collections.length; i++) {
+      var col = collections[i];
+      var found = (ont[col]||[]).some(function(n){ return n && n.id === nodeId; });
+      if (found) return col;
+    }
+    return '';
+  }
+
+  function nlpToggleNodeLock(nodeId, colName) {
+    if (!nlpCurrentDraft || !nlpCurrentDraft[colName]) return;
+    var node = nlpCurrentDraft[colName].find(function(n){ return n && n.id === nodeId; });
+    if (!node) return;
+    if (!node._ctx) node._ctx = {};
+    node._ctx.locked = !node._ctx.locked;
+    node._ctx.confirmed = node._ctx.locked ? true : node._ctx.confirmed;
+    // Re-render right panel to show updated lock state
+    nlpRenderRightPanel(nlpCurrentDraft, nlpConfidenceNotes);
+  }
+
+  function nlpToggleNodeConfirm(nodeId, colName) {
+    if (!nlpCurrentDraft || !nlpCurrentDraft[colName]) return;
+    var node = nlpCurrentDraft[colName].find(function(n){ return n && n.id === nodeId; });
+    if (!node) return;
+    if (!node._ctx) node._ctx = {};
+    node._ctx.confirmed = !node._ctx.confirmed;
+    nlpRenderRightPanel(nlpCurrentDraft, nlpConfidenceNotes);
+  }
+
+  function nlpClearNeedsReview(nodeId, colName) {
+    if (!nlpCurrentDraft || !nlpCurrentDraft[colName]) return;
+    var node = nlpCurrentDraft[colName].find(function(n){ return n && n.id === nodeId; });
+    if (!node || !node._ctx) return;
+    node._ctx.needs_review = false;
+    nlpRenderRightPanel(nlpCurrentDraft, nlpConfidenceNotes);
+  }
+
   function nlpGetSystemPrompt() {
     var schema = JSON.stringify(emptyOntology(), null, 2);
     return 'Kamu adalah asisten yang membantu menyusun ontologi program SROI/TJSL dari deskripsi bebas.\n\n' +
@@ -3154,13 +3593,14 @@
     composer.value = '';
     nlpAppendBubble('user', text, null);
     nlpHistory.push({ role:'user', content: text });
+    nlpHistoryNarasi.push({ role:'user', content: text });
     var loadId = nlpAppendLoading();
     document.getElementById('nlpSendBtn').disabled = true;
     document.getElementById('nlpSendIcon').style.display = 'none';
     document.getElementById('nlpSendSpinner').style.display = '';
     document.getElementById('nlpSendLabel').textContent = 'Memproses';
     try {
-      var sys = nlpGetSystemPrompt();
+      var sys = nlpGetSystemPromptWithState();
       var full;
       if (nlpMode === 'compare') {
         if (!nlpKeyAnthropic || !nlpKeyOpenai) throw new Error('Mode komparasi membutuhkan kedua API key (Claude + GPT).');
@@ -3178,14 +3618,19 @@
         full = claudeResult || gptResult || '';
         if (full) {
           nlpHistory.push({ role:'assistant', content: full });
+          nlpHistoryNarasi.push({ role:'assistant', content: nlpExtractNarasi(full) });
           var sep = full.indexOf('---JSON---');
           if (sep !== -1) {
             try {
               var cleaned = full.slice(sep+10).trim().replace(/^```json\s*/,'').replace(/```\s*$/,'').trim();
               var parsed = JSON.parse(cleaned);
-              nlpCurrentDraft = parsed.ontology_json || null;
+              var rawDraft2 = parsed.ontology_json || null;
               nlpConfidenceNotes = parsed.confidence_notes || [];
-              if (nlpCurrentDraft) {
+              if (rawDraft2) {
+                var turnNum2 = nlpHistory.length;
+                var withCtx2 = nlpBuildCtx(rawDraft2, turnNum2);
+                var diffed2 = nlpDiffAndLog(nlpCurrentDraft, withCtx2, turnNum2);
+                nlpCurrentDraft = nlpFlagDownstream(diffed2);
                 nlpRenderRightPanel(nlpCurrentDraft, nlpConfidenceNotes);
                 document.getElementById('nlpModalFoot').style.display = 'flex';
               }
@@ -3234,13 +3679,22 @@
     var narasiClean = narasi.replace(/\[CHIP:[^\]]+\]/g, '').trim();
     nlpAppendBubble('assistant', narasiClean, chips);
     nlpHistory.push({ role:'assistant', content: full });
+    nlpHistoryNarasi.push({ role:'assistant', content: nlpExtractNarasi(full) });
     if (!jsonStr) return;
     try {
       var cleaned = jsonStr.replace(/^```json\s*/,'').replace(/^```\s*/,'').replace(/```\s*$/,'').trim();
       var parsed = JSON.parse(cleaned);
-      nlpCurrentDraft = parsed.ontology_json || null;
+      var rawDraft = parsed.ontology_json || null;
       nlpConfidenceNotes = parsed.confidence_notes || [];
-      if (nlpCurrentDraft) {
+      if (rawDraft) {
+        var turnNum = nlpHistory.length;
+        // 1. Build _ctx for all nodes (pathway, upstream, downstream, siblings)
+        var withCtx = nlpBuildCtx(rawDraft, turnNum);
+        // 2. Diff against previous draft — log changes, flag downstream
+        var prevDraft = nlpCurrentDraft;
+        var diffed = nlpDiffAndLog(prevDraft, withCtx, turnNum);
+        var flagged = nlpFlagDownstream(diffed);
+        nlpCurrentDraft = flagged;
         nlpRenderRightPanel(nlpCurrentDraft, nlpConfidenceNotes);
         document.getElementById('nlpModalFoot').style.display = 'flex';
       }
@@ -3255,7 +3709,7 @@
     var thread = document.getElementById('nlpChatThread');
     var div = document.createElement('div');
     div.className = 'nlp-bubble ' + role;
-    div.innerHTML = '<div class="nlp-bubble-label">' + (role==='user'?'Input Pengguna':'AI') + '</div><p>' + nlpEsc(text).replace(/\n/g,'<br>') + '</p>';
+    div.innerHTML = '<div class="nlp-bubble-label">' + (role==='user'?'Input Pengguna':'AI') + '</div><p>' + nlpEsc(text).split('\n').join('<br>') + '</p>';
     if (chips && chips.length) {
       var row = document.createElement('div');
       row.className = 'nlp-chips';
@@ -3310,6 +3764,7 @@
   function nlpReset() {
     if (!confirm('Reset sesi? Riwayat chat dan draft sementara akan dihapus.')) return;
     nlpHistory = [];
+    nlpHistoryNarasi = [];
     nlpCurrentDraft = null;
     nlpConfidenceNotes = [];
     var thread = document.getElementById('nlpChatThread');
@@ -3397,7 +3852,30 @@
         html += '</div></div><div class="nlp-node-grid">';
         [{label:'Masalah',node:prob},{label:'Aktivitas',node:firstAct},{label:'Output',node:firstOD},{label:'Penerima Manfaat',node:bNode},{label:'Outcome',node:oc},{label:'Monetisasi Kandidat',node:firstMon}].forEach(function(item){
           var st=nsc(item.node);
-          html+='<div class="nlp-node '+st+'"><p class="nlp-node-label">'+nlpEsc(item.label)+'</p><p>'+nt(item.node)+'</p><small>Status: '+sl(st)+'</small></div>';
+          var nr = item.node;
+          var nrCtx = nr && nr._ctx ? nr._ctx : {};
+          var nrClass = st + (nrCtx.needs_review ? ' needs-review' : '');
+          var nrCol = nr ? nlpColForNode(ont, nr.id) : '';
+          html += '<div class="nlp-node ' + nrClass + '">';
+          html += '<p class="nlp-node-label">' + nlpEsc(item.label) + '</p>';
+          html += '<p>' + nt(nr) + '</p>';
+          html += '<small>Status: ' + sl(st) + (nrCtx.origin_turn ? ' · turn ' + nrCtx.origin_turn : '') + '</small>';
+          if (nr && nrCol) {
+            var nid = nlpEsc(nr.id), ncol = nlpEsc(nrCol);
+            html += '<div class="nlp-node-badges">';
+            if (nrCtx.needs_review) {
+              html += '<span class="nlp-node-badge needs-review" data-action="review" data-id="' + nid + '" data-col="' + ncol + '" title="Tandai sudah direview">⚠ Review</span>';
+            }
+            if (nrCtx.locked) {
+              html += '<span class="nlp-node-badge locked" data-action="lock" data-id="' + nid + '" data-col="' + ncol + '" title="Klik untuk unlock">🔒 Locked</span>';
+            } else if (nrCtx.confirmed) {
+              html += '<span class="nlp-node-badge confirmed" data-action="lock" data-id="' + nid + '" data-col="' + ncol + '" title="Klik untuk lock node">✓ Confirmed</span>';
+            } else {
+              html += '<span class="nlp-node-badge unlocked" data-action="confirm" data-id="' + nid + '" data-col="' + ncol + '" title="Konfirmasi node ini">Konfirmasi</span>';
+            }
+            html += '</div>';
+          }
+          html += '</div>';
         });
         html += '</div></div>';
       });
