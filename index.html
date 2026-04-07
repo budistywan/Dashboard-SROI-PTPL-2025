@@ -6344,7 +6344,7 @@
       type: 'function',
       function: {
         name: 'search_batch_problems',
-        description: 'Cari evidence untuk SEMUA problem nodes sekaligus (1 call saja). Kembalikan max 3 referensi per node. Hasilnya dikembalikan ke kamu — gunakan ref_ids di evidence_ids saat create_node problem.',
+        description: 'WAJIB dipanggil PERTAMA sebelum create_node apapun untuk problem nodes. Jangan buat problem node tanpa memanggil tool ini dulu. Cari evidence untuk SEMUA problem nodes sekaligus (1 call). Hasilnya dikembalikan — gunakan ref_ids di evidence_ids saat create_node.',
         parameters: {
           type: 'object',
           properties: {
@@ -6490,20 +6490,29 @@
 
       case 'create_node': {
         var col = args.collection;
-        // Bangun data node dari parameter terpisah (bukan embedded object)
         var data = Object.assign({}, args.extra_fields || {});
         data.id     = args.node_id;
         data.label  = data.label || args.label || '';
         if (!data.id && args.data && args.data.id) { data = Object.assign({}, args.data); }
         if (!data.id) { console.error('[AGENT] create_node tanpa node_id!', args); return { error: 'node_id wajib' }; }
+
+        // INTERCEPT: problem node tanpa evidence → auto-trigger search dulu
+        if (col === 'problem_nodes' && (!args.evidence_ids || !args.evidence_ids.length)) {
+          console.warn('[AGENT] Problem node tanpa evidence — auto search untuk', data.id);
+          var autoQuery = (data.label || args.label || data.id) + ' masalah sosial ekonomi Indonesia CSR program';
+          var autoResults = await agentSearchBatch(autoQuery, [data.id], 'problem_framing', 3);
+          if (autoResults.length) {
+            args.evidence_ids = autoResults.map(function(r){ return r.id; });
+            agentAppendBubble('agent', '🔍 Auto-search evidence untuk ' + data.id + ' → ' + autoResults.length + ' referensi ditemukan.');
+          }
+        }
+
         data._agent_status    = 'draft';
         data._agent_reasoning = args.reasoning || '';
         data._agent_evidence  = args.evidence_ids || [];
-        // MON dual-card metadata
         if (args.mon_source_type) data._mon_source_type = args.mon_source_type;
         if (args.mon_paired_with) data._mon_paired_with = args.mon_paired_with;
         if (!Array.isArray(ont[col])) ont[col] = [];
-        // Cek duplikat
         var existingNode = ont[col].find(function(n){ return n && n.id === data.id; });
         if (existingNode) {
           console.warn('[AGENT] Duplikat ID:', data.id, '— skip');
@@ -6512,12 +6521,8 @@
         console.log('[AGENT] create_node:', data.id, 'di', col, '| label:', data.label, '| evidence_ids:', args.evidence_ids||[]);
         ont[col].push(data);
 
-        // Simpan objek evidence ke node langsung dari evidenceByNode
-        // (sudah diisi oleh search_evidence yang sync sebelumnya)
         var nodeEvidObjs = agentState.evidenceByNode[data.id] || [];
-        if (nodeEvidObjs.length) {
-          data._agent_evidence_objects = nodeEvidObjs;
-        }
+        if (nodeEvidObjs.length) data._agent_evidence_objects = nodeEvidObjs;
 
         agentState.opLog.push({ id: opId, tool: 'create_node', collection: col, node_id: data.id, reasoning: args.reasoning });
         agentRenderCard(data.id, col, data, args.reasoning, nodeEvidObjs.length ? nodeEvidObjs : (args.evidence_ids || []));
@@ -6808,9 +6813,15 @@
           web_search_options: {},
           messages: [
             { role: 'system', content: 'Kamu adalah research assistant SROI program CSR Indonesia. '
-              + 'Berikan maksimal ' + maxTotal + ' referensi terpercaya (pemerintah, jurnal, laporan resmi). '
+              + 'Berikan maksimal ' + maxTotal + ' referensi. '
+              + 'PRIORITAS SUMBER (urut dari tertinggi):\n'
+              + '1. Jurnal akademik peer-reviewed (Google Scholar, DOAJ, Garuda, Sinta, Scopus)\n'
+              + '2. Laporan kajian/riset dari lembaga resmi (BPS, Kemenristekdikti, BRIN, LIPI, World Bank, ILO, UNDP)\n'
+              + '3. Regulasi/kebijakan pemerintah (peraturan.go.id, jdih.go.id)\n'
+              + '4. Laporan tahunan/kajian CSR dari perusahaan atau lembaga terpercaya\n'
+              + 'HINDARI: blog, berita umum, Wikipedia, sumber tanpa institusi jelas.\n'
               + 'Untuk setiap referensi, tandai node mana yang paling relevan dari daftar target nodes. '
-              + 'Format setiap baris: JUDUL | TAHUN | URL | RELEVANSI | NODE_ID_TARGET'
+              + 'Format setiap baris: JUDUL | TAHUN | URL | RELEVANSI_SINGKAT | NODE_ID_TARGET'
               + '\nPastikan URL lengkap dimulai dengan https://. Jangan tambahkan teks lain.' },
             { role: 'user', content: query + nodeList }
           ]
@@ -6901,7 +6912,14 @@
           max_tokens: 1500,
           web_search_options: {},
           messages: [
-            { role: 'system', content: 'Kamu adalah research assistant untuk analisis SROI program CSR Indonesia. Berikan 3-5 referensi terpercaya (pemerintah, jurnal, laporan resmi) yang relevan. Format setiap referensi pada baris terpisah: JUDUL | TAHUN | URL | RELEVANSI_SINGKAT. Jangan tambahkan teks lain selain daftar referensi.' },
+            { role: 'system', content: 'Kamu adalah research assistant untuk analisis SROI program CSR Indonesia. '
+              + 'Berikan 3-5 referensi dengan PRIORITAS:\n'
+              + '1. Jurnal akademik peer-reviewed (Google Scholar, DOAJ, Garuda, Sinta, Scopus)\n'
+              + '2. Laporan kajian dari lembaga resmi (BPS, BRIN, LIPI, Kementerian, World Bank, ILO, UNDP)\n'
+              + '3. Regulasi/kebijakan pemerintah resmi\n'
+              + 'HINDARI: blog, berita umum, Wikipedia, sumber tanpa institusi jelas.\n'
+              + 'Format setiap referensi pada baris terpisah: JUDUL | TAHUN | URL | RELEVANSI_SINGKAT\n'
+              + 'Pastikan URL lengkap dimulai https://. Jangan tambahkan teks lain.' },
             { role: 'user', content: prompt }
           ]
         })
@@ -7012,53 +7030,38 @@
       : '';
 
     var systemPrompt = 'Kamu adalah Ontology Builder Agent untuk analisis SROI/TJSL program CSR Indonesia.\n\n' +
-      'ALUR BUILD FASE 1 (sampai checkpoint):\n' +
-      '1. search_batch_problems(program_context, problem_ids) — 1 call\n' +
-      '2. create_node setiap problem node dengan evidence_ids dari hasil search\n' +
-      '3. create_node outcome_nodes — TANPA search\n' +
+      'ATURAN TIDAK BOLEH DILANGGAR:\n' +
+      '- DILARANG membuat problem_node tanpa search_batch_problems terlebih dahulu\n' +
+      '- Setiap problem_node WAJIB punya evidence_ids terisi — problem tanpa evidence = ERROR\n' +
+      '- search_batch_problems HARUS dipanggil PERTAMA sebelum create_node apapun\n\n' +
+      'ALUR BUILD FASE 1 (urutan wajib, jangan dibalik):\n' +
+      '1. search_batch_problems(program_context, problem_ids=["PROB-01","PROB-01.1",...]) ← PERTAMA\n' +
+      '2. Dari hasil search ambil ref_ids → create_node setiap problem node dengan evidence_ids terisi\n' +
+      '3. create_node outcome_nodes — TANPA search, evidence_ids=[]\n' +
       '4. link_nodes relasi\n' +
       '5. checkpoint()\n\n' +
       'ALUR BUILD FASE 2 (setelah user klik Lanjutkan):\n' +
       '6. create_node activity, output_delivery, stakeholder, beneficiary, baseline — TANPA search\n' +
       '7. create_node indicator_nodes — TANPA search\n' +
       '8. Untuk setiap aspek monetisasi, buat DUA node:\n' +
-      '   MON-[ASPEK]-INT (internal_report, placeholder) + MON-[ASPEK]-PRX (proxy, butuh evidence)\n' +
+      '   MON-[ASPEK]-INT (internal_report, placeholder) + MON-[ASPEK]-PRX (proxy + evidence)\n' +
       '   search_batch_proxies SEBELUM buat semua MON-PRX\n' +
       '9. search_batch_ddat → create_node ADJ + flag_for_verification\n' +
       '10. final_value_nodes, compute_fva, run_qa\n\n' +
-      'ATURAN REFINEMENT (perintah user setelah build):\n\n' +
-      'R1 — Jika user meminta TAMBAH PROBLEM NODE:\n' +
-      '  1. search_batch_problems(query spesifik, [node_id baru])\n' +
-      '  2. create_node problem dengan evidence dari search\n' +
-      '  3. link_nodes ke parent dan ke PROB-01 jika sub-problem\n\n' +
-      'R2 — Jika user meminta TAMBAH OUTCOME NODE:\n' +
-      '  1. create_node outcome_node (tanpa search)\n' +
-      '  2. Identifikasi aspek monetisasi yang relevan dari outcome tsb\n' +
-      '  3. Untuk setiap aspek:\n' +
-      '     a. create_node MON-[ASPEK]-INT (placeholder, tanpa search)\n' +
-      '     b. search_batch_proxies untuk aspek tsb\n' +
-      '     c. create_node MON-[ASPEK]-PRX dengan evidence\n' +
-      '  4. link_nodes outcome → indicator → MON\n\n' +
-      'R3 — Jika user meminta HAPUS NODE:\n' +
-      '  1. delete_node(node_id, collection, reasoning)\n' +
-      '  2. Lapor downstream yang terpengaruh\n' +
-      '  3. Tanya apakah perlu re-arrange downstream\n\n' +
-      'R4 — Jika user meminta CARIKAN EVIDENCE untuk node tertentu:\n' +
-      '  1. search_evidence(query, purpose, target_node_id) — 1 call\n' +
-      '  2. update_node dengan evidence_ids baru\n\n' +
-      'DETEKSI INTENT:\n' +
-      '  "tambah problem / masalah baru" → R1\n' +
-      '  "tambah outcome / manfaat / hasil baru" → R2\n' +
-      '  "hapus / delete [node_id]" → R3\n' +
-      '  "carikan / cari evidence / referensi untuk [node]" → R4\n' +
-      '  Selain itu → free-form, gunakan tools yang sesuai\n\n' +
+      'ATURAN REFINEMENT:\n' +
+      '  Tambah problem → search_batch_problems dulu → create_node dengan evidence_ids\n' +
+      '  Tambah outcome → create_node outcome → dual MON (INT+PRX dengan search_batch_proxies)\n' +
+      '  Hapus node → delete_node → lapor downstream\n' +
+      '  Cari evidence → search_evidence → update_node\n\n' +
       'ATURAN SEARCH:\n' +
-      '  search_batch_problems → 1 call, max 3 ref/node, URL wajib\n' +
+      '  search_batch_problems → WAJIB untuk problem, 1 call, max 3 ref/node, URL wajib ada\n' +
       '  search_batch_proxies  → 1 call, max 2 ref/proxy\n' +
       '  search_batch_ddat     → 1 call, 1 ref/faktor\n' +
       '  Outcome, activity, output, indicator, MON-INT → TIDAK ADA search\n\n' +
       'CARA create_node:\n' +
-      '  node_id:"PROB-01.1" label:"Judul" evidence_ids:[...] extra_fields:{...} reasoning:"..."\n\n' +
+      '  node_id:"PROB-01.1" (WAJIB) | label:"Judul" (WAJIB)\n' +
+      '  evidence_ids:["REF-AGT-PROB-01-1-1","REF-AGT-PROB-01-1-2"] ← dari hasil search\n' +
+      '  extra_fields:{dimension:"economic", description:"..."} | reasoning:"Alasan"\n\n' +
       'ATURAN ID:\n' +
       '  problem:PROB-01,PROB-01.1 | outcome:OC-ECO-01 | activity:ACT_YYYY\n' +
       '  MON internal:MON-JSP-INT | MON proxy:MON-JSP-PRX | adjustment:ADJ-JSP\n\n' +
