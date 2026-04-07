@@ -6302,16 +6302,18 @@
       type: 'function',
       function: {
         name: 'create_node',
-        description: 'Buat satu node baru di collection ontologi. Selalu sertakan reasoning dan evidence_ids. Dipanggil untuk setiap node yang akan dibuat.',
+        description: 'Buat satu node baru di collection ontologi.',
         parameters: {
           type: 'object',
           properties: {
-            collection: { type: 'string', description: 'Nama collection: problem_nodes | activity_nodes | stakeholder_nodes | beneficiary_nodes | output_delivery_nodes | baseline_nodes | outcome_nodes | indicator_nodes | monetisation_pre_fix_nodes | impact_adjustment_nodes | final_value_nodes | final_value_aggregates | investment_nodes | investment_aggregates' },
-            node_id: { type: 'string', description: 'ID unik node. Format: PROB-01, PROB-01.1, ACT_2023, OC-ECO-01, IND-ECO-01, MON-JSP, ADJ_JSP, FV_2023_MON_JSP, dll. WAJIB diisi.' },
-            label: { type: 'string', description: 'Label/judul node dalam bahasa Indonesia.' },
-            extra_fields: { type: 'object', description: 'Field tambahan sesuai collection. Contoh: {dimension:"economic", problem_type:"structural_gap", description:"...", vulnerability_anchor:{...}} untuk problem_nodes. {dimension:"economic", description:"..."} untuk outcome_nodes.' },
-            reasoning: { type: 'string', description: 'Penjelasan mengapa node ini dibuat dengan isi seperti ini' },
-            evidence_ids: { type: 'array', items: { type: 'string' }, description: 'Array ref_id dari evidence yang mendukung node ini' }
+            collection: { type: 'string', description: 'problem_nodes | activity_nodes | stakeholder_nodes | beneficiary_nodes | output_delivery_nodes | baseline_nodes | outcome_nodes | indicator_nodes | monetisation_pre_fix_nodes | impact_adjustment_nodes | final_value_nodes | final_value_aggregates | investment_nodes | investment_aggregates' },
+            node_id:    { type: 'string', description: 'ID unik. WAJIB. Format: PROB-01, PROB-01.1, OC-ECO-01, MON-JSP-INT, MON-JSP-PRX, ADJ-JSP, dll.' },
+            label:      { type: 'string', description: 'Label singkat bahasa Indonesia. WAJIB.' },
+            extra_fields: { type: 'object', description: 'Field tambahan sesuai collection.' },
+            reasoning:  { type: 'string', description: 'Alasan membuat node ini.' },
+            evidence_ids: { type: 'array', items: { type: 'string' }, description: 'ref_ids dari hasil search_batch_problems, search_batch_proxies, atau search_batch_ddat.' },
+            mon_source_type: { type: 'string', enum: ['internal_report','proxy'], description: 'Wajib untuk monetisation_pre_fix_nodes. internal_report = dari laporan program, proxy = dari estimasi/proksi.' },
+            mon_paired_with: { type: 'string', description: 'Untuk MON nodes: ID pasangan node (INT pasangan PRX atau sebaliknya).' }
           },
           required: ['collection', 'node_id', 'label', 'reasoning']
         }
@@ -6321,13 +6323,13 @@
       type: 'function',
       function: {
         name: 'link_nodes',
-        description: 'Tambah relasi ke relation_index. Dipanggil setelah create_node untuk menghubungkan node.',
+        description: 'Tambah relasi ke relation_index.',
         parameters: {
           type: 'object',
           properties: {
-            relation_key: { type: 'string', description: 'Key di relation_index, contoh: problem_to_activity | activity_to_output_delivery | output_delivery_to_outcome | outcome_to_indicator | indicator_to_monetisation | monetisation_to_adjustment | adjustment_to_final_value | monetisation_to_final_value | problem_to_sub_problem | problem_to_baseline | output_delivery_to_beneficiary' },
+            relation_key: { type: 'string' },
             from_id: { type: 'string' },
-            to_ids: { type: 'array', items: { type: 'string' }, description: 'Array of IDs yang dituju' }
+            to_ids:  { type: 'array', items: { type: 'string' } }
           },
           required: ['relation_key', 'from_id', 'to_ids']
         }
@@ -6336,16 +6338,45 @@
     {
       type: 'function',
       function: {
-        name: 'search_evidence',
-        description: 'Cari referensi untuk mendukung sebuah node. Tool ini SYNCHRONOUS — hasilnya langsung dikembalikan ke kamu berisi daftar referensi dengan IDs. Gunakan IDs tersebut di evidence_ids saat create_node berikutnya. WAJIB dipanggil sebelum problem_node dan proxy MON node.',
+        name: 'search_batch_problems',
+        description: 'Cari evidence untuk SEMUA problem nodes sekaligus (1 call saja). Kembalikan max 3 referensi per node. Hasilnya dikembalikan ke kamu — gunakan ref_ids di evidence_ids saat create_node problem.',
         parameters: {
           type: 'object',
           properties: {
-            query: { type: 'string', description: 'Query pencarian dalam bahasa Indonesia atau Inggris' },
-            purpose: { type: 'string', enum: ['problem_framing', 'proxy_basis', 'ddat_justification', 'other'], description: 'Tujuan pencarian' },
-            target_node_id: { type: 'string', description: 'ID node yang akan didukung evidence ini' }
+            program_context: { type: 'string', description: 'Deskripsi program dan masalah utama yang ingin di-frame.' },
+            problem_ids:     { type: 'array', items: { type: 'string' }, description: 'Semua problem node IDs yang akan dibuat (PROB-01, PROB-01.1, dst).' }
           },
-          required: ['query', 'purpose', 'target_node_id']
+          required: ['program_context', 'problem_ids']
+        }
+      }
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'search_batch_proxies',
+        description: 'Cari evidence untuk MON proxy nodes (1 call untuk semua proxy sekaligus). Max 2 referensi per proxy. Hasilnya dikembalikan — gunakan ref_ids saat create_node MON-XXX-PRX.',
+        parameters: {
+          type: 'object',
+          properties: {
+            proxy_aspects: { type: 'array', items: { type: 'string' }, description: 'Nama aspek proxy yang perlu dicari evidence-nya, misal ["nilai aktivasi TEFA per sekolah","serapan kerja lulusan SMK"].' },
+            node_ids:      { type: 'array', items: { type: 'string' }, description: 'MON-PRX node IDs yang akan didukung.' }
+          },
+          required: ['proxy_aspects', 'node_ids']
+        }
+      }
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'search_batch_ddat',
+        description: 'Cari evidence untuk faktor DDAT (1 call untuk semua faktor). Simple: 1 referensi per faktor (DW, DS, AT, DO). Hasilnya dikembalikan — gunakan saat create_node ADJ.',
+        parameters: {
+          type: 'object',
+          properties: {
+            program_context: { type: 'string', description: 'Tipe program dan konteks untuk menilai besaran DDAT.' },
+            factors_needed:  { type: 'array', items: { type: 'string' }, enum: ['DW','DS','AT','DO'], description: 'Faktor DDAT yang perlu dicari evidence-nya.' }
+          },
+          required: ['program_context', 'factors_needed']
         }
       }
     },
@@ -6353,15 +6384,15 @@
       type: 'function',
       function: {
         name: 'flag_for_verification',
-        description: 'Tandai node untuk diverifikasi human. WAJIB dipanggil setelah propose proxy_value_idr dan DDAT factor rates. Juga dipanggil saat agent tidak yakin.',
+        description: 'Tandai node untuk diverifikasi human. Wajib untuk MON-PRX nodes dan ADJ nodes.',
         parameters: {
           type: 'object',
           properties: {
-            node_id: { type: 'string' },
-            type: { type: 'string', enum: ['proxy_value', 'ddat_factor', 'problem_framing', 'other'] },
-            question: { type: 'string', description: 'Pertanyaan spesifik untuk human' },
-            agent_proposal: { type: 'object', description: 'Nilai/konten yang agent usulkan' },
-            blocking: { type: 'boolean', description: 'true = agent pause sampai human jawab. Hanya true jika agent benar-benar tidak bisa lanjut tanpa jawaban.' }
+            node_id:        { type: 'string' },
+            type:           { type: 'string', enum: ['proxy_value','ddat_factor','problem_framing','other'] },
+            question:       { type: 'string' },
+            agent_proposal: { type: 'object' },
+            blocking:       { type: 'boolean' }
           },
           required: ['node_id', 'type', 'question', 'agent_proposal']
         }
@@ -6371,14 +6402,14 @@
       type: 'function',
       function: {
         name: 'update_node',
-        description: 'Update field tertentu dari node yang sudah ada di draft.',
+        description: 'Update field tertentu dari node yang sudah ada.',
         parameters: {
           type: 'object',
           properties: {
             collection: { type: 'string' },
-            node_id: { type: 'string' },
-            patch: { type: 'object', description: 'Field-field yang diupdate saja (partial update)' },
-            reasoning: { type: 'string' }
+            node_id:    { type: 'string' },
+            patch:      { type: 'object' },
+            reasoning:  { type: 'string' }
           },
           required: ['collection', 'node_id', 'patch']
         }
@@ -6388,12 +6419,10 @@
       type: 'function',
       function: {
         name: 'compute_fva',
-        description: 'Hitung ulang final_value_aggregates dari FV nodes yang ada di draft.',
+        description: 'Hitung ulang final_value_aggregates dari FV nodes.',
         parameters: {
           type: 'object',
-          properties: {
-            years: { type: 'array', items: { type: 'number' }, description: 'Tahun-tahun yang perlu dihitung ulang' }
-          },
+          properties: { years: { type: 'array', items: { type: 'number' } } },
           required: ['years']
         }
       }
@@ -6401,29 +6430,11 @@
     {
       type: 'function',
       function: {
-        name: 'assess_impact',
-        description: 'Hitung dampak perubahan pada sebuah node ke downstream. Dipanggil otomatis setelah human edit/hapus/tambah node.',
-        parameters: {
-          type: 'object',
-          properties: {
-            changed_node_id: { type: 'string' },
-            change_type: { type: 'string', enum: ['edit', 'delete', 'add'] },
-            change_detail: { type: 'object', description: 'Detail apa yang berubah' }
-          },
-          required: ['changed_node_id', 'change_type', 'change_detail']
-        }
-      }
-    },
-    {
-      type: 'function',
-      function: {
         name: 'run_qa',
-        description: 'Periksa konsistensi ontologi draft. Cek node kosong, relasi putus, proxy tanpa evidence, dll.',
+        description: 'Periksa konsistensi ontologi draft.',
         parameters: {
           type: 'object',
-          properties: {
-            scope: { type: 'string', enum: ['full', 'problem', 'monetisation', 'relations', 'fva'], description: 'Scope QA check' }
-          },
+          properties: { scope: { type: 'string', enum: ['full','problem','monetisation','relations','fva'] } },
           required: ['scope']
         }
       }
@@ -6432,14 +6443,13 @@
       type: 'function',
       function: {
         name: 'checkpoint',
-        description: 'Dipanggil setelah problem_nodes dan outcome_nodes selesai dibuat (Fase 2 selesai). Tampilkan ringkasan ke human dan tunggu konfirmasi untuk lanjut ke fase berikutnya.',
+        description: 'Dipanggil setelah problem + outcome selesai. Pause dan tunggu konfirmasi human sebelum lanjut ke layer berikutnya.',
         parameters: {
           type: 'object',
           properties: {
-            summary: { type: 'string', description: 'Ringkasan apa yang sudah dibangun' },
-            problems_built: { type: 'array', items: { type: 'string' }, description: 'IDs problem nodes yang sudah dibuat' },
-            outcomes_built: { type: 'array', items: { type: 'string' }, description: 'IDs outcome nodes yang sudah dibuat' },
-            next_step: { type: 'string', description: 'Apa yang akan dibangun selanjutnya' }
+            summary:        { type: 'string' },
+            problems_built: { type: 'array', items: { type: 'string' } },
+            outcomes_built: { type: 'array', items: { type: 'string' } }
           },
           required: ['summary', 'problems_built', 'outcomes_built']
         }
@@ -6463,17 +6473,14 @@
         var data = Object.assign({}, args.extra_fields || {});
         data.id     = args.node_id;
         data.label  = data.label || args.label || '';
-        // Fallback: kalau GPT masih kirim data object lama
-        if (!data.id && args.data && args.data.id) {
-          data = Object.assign({}, args.data);
-        }
-        if (!data.id) {
-          console.error('[AGENT] create_node dipanggil tanpa node_id!', args);
-          return { error: 'node_id wajib diisi' };
-        }
-        data._agent_status   = 'draft';
+        if (!data.id && args.data && args.data.id) { data = Object.assign({}, args.data); }
+        if (!data.id) { console.error('[AGENT] create_node tanpa node_id!', args); return { error: 'node_id wajib' }; }
+        data._agent_status    = 'draft';
         data._agent_reasoning = args.reasoning || '';
         data._agent_evidence  = args.evidence_ids || [];
+        // MON dual-card metadata
+        if (args.mon_source_type) data._mon_source_type = args.mon_source_type;
+        if (args.mon_paired_with) data._mon_paired_with = args.mon_paired_with;
         if (!Array.isArray(ont[col])) ont[col] = [];
         // Cek duplikat
         var existingNode = ont[col].find(function(n){ return n && n.id === data.id; });
@@ -6510,27 +6517,87 @@
         return { success: true };
       }
 
-      case 'search_evidence': {
-        agentState.opLog.push({ id: opId, tool: 'search_evidence', query: args.query, purpose: args.purpose, target: args.target_node_id });
-        agentState.evidenceByNode[args.target_node_id] = agentState.evidenceByNode[args.target_node_id] || [];
-        console.log('[AGENT] search_evidence → target:', args.target_node_id, '| query:', args.query);
-
-        // SYNC — await hasil, return ke GPT agar bisa dipakai saat create_node berikutnya
-        var searchResults = await agentSearchEvidence(args.query, args.target_node_id, args.purpose);
-
-        // Ringkasan untuk GPT (title + relevance, tanpa URL panjang)
-        var summary = searchResults.map(function(r, i) {
-          return (i+1) + '. [' + r.id + '] ' + r.title + (r.year ? ' (' + r.year + ')' : '') +
-                 (r.relevance_note ? ' — ' + r.relevance_note : '');
+      case 'search_batch_problems': {
+        agentState.opLog.push({ id: opId, tool: 'search_batch_problems', context: args.program_context });
+        console.log('[AGENT] search_batch_problems → nodes:', args.problem_ids);
+        var pResults = await agentSearchBatch(
+          args.program_context,
+          args.problem_ids || [],
+          'problem_framing',
+          3  // max refs per node
+        );
+        var pSummary = pResults.map(function(r,i){
+          return (i+1)+'. ['+r.id+'] '+r.title+(r.year?' ('+r.year+')':'')+(r.relevance_note?' — '+r.relevance_note:'')+(r._for_node?' [→'+r._for_node+']':'');
         }).join('\n');
-
         return {
           success: true,
-          node_id: args.target_node_id,
-          count: searchResults.length,
-          references: searchResults.map(function(r){ return { id: r.id, title: r.title, year: r.year }; }),
-          summary: summary || 'Tidak ada referensi ditemukan.',
-          instruction: 'Gunakan reference IDs di atas pada field evidence_ids saat create_node untuk ' + args.target_node_id + '.'
+          count: pResults.length,
+          references: pResults.map(function(r){ return {id:r.id, title:r.title, year:r.year, for_node:r._for_node}; }),
+          summary: pSummary || 'Tidak ada referensi ditemukan.',
+          instruction: 'Gunakan ref_ids di atas pada evidence_ids saat create_node. Setiap ref sudah diberi tag for_node.'
+        };
+      }
+
+      case 'search_batch_proxies': {
+        agentState.opLog.push({ id: opId, tool: 'search_batch_proxies', aspects: args.proxy_aspects });
+        console.log('[AGENT] search_batch_proxies → aspects:', args.proxy_aspects);
+        var prxQuery = 'Cari referensi proxy value untuk aspek monetisasi berikut dalam konteks program CSR Indonesia:\n'
+          + (args.proxy_aspects||[]).join(', ');
+        var prxResults = await agentSearchBatch(
+          prxQuery,
+          args.node_ids || [],
+          'proxy_basis',
+          2  // max 2 refs per proxy
+        );
+        var prxSummary = prxResults.map(function(r,i){
+          return (i+1)+'. ['+r.id+'] '+r.title+(r.year?' ('+r.year+')':'')+(r._for_node?' [→'+r._for_node+']':'');
+        }).join('\n');
+        return {
+          success: true,
+          count: prxResults.length,
+          references: prxResults.map(function(r){ return {id:r.id, title:r.title, year:r.year, for_node:r._for_node}; }),
+          summary: prxSummary || 'Tidak ada referensi ditemukan.',
+          instruction: 'Gunakan ref_ids di atas pada evidence_ids saat create_node MON-XXX-PRX.'
+        };
+      }
+
+      case 'search_batch_ddat': {
+        agentState.opLog.push({ id: opId, tool: 'search_batch_ddat', context: args.program_context });
+        console.log('[AGENT] search_batch_ddat → factors:', args.factors_needed);
+        var ddatQuery = 'Cari 1 referensi empiris untuk masing-masing faktor DDAT berikut dalam program CSR Indonesia:\n'
+          + (args.factors_needed||[]).join(', ')
+          + '\nKonteks program: ' + args.program_context;
+        var ddatResults = await agentSearchBatch(
+          ddatQuery,
+          args.factors_needed || [],
+          'ddat_justification',
+          1  // 1 ref per faktor
+        );
+        var ddatSummary = ddatResults.map(function(r,i){
+          return (i+1)+'. ['+r.id+'] '+r.title+(r.year?' ('+r.year+')':'')+(r._for_node?' [faktor '+r._for_node+']':'');
+        }).join('\n');
+        return {
+          success: true,
+          count: ddatResults.length,
+          references: ddatResults.map(function(r){ return {id:r.id, title:r.title, year:r.year, for_factor:r._for_node}; }),
+          summary: ddatSummary || 'Tidak ada referensi ditemukan.',
+          instruction: 'Gunakan ref_ids di atas saat create_node ADJ. Setiap ref untuk 1 faktor.'
+        };
+      }
+
+      // Legacy: search_evidence tunggal — masih bisa dipanggil untuk refinement
+      case 'search_evidence': {
+        agentState.opLog.push({ id: opId, tool: 'search_evidence', query: args.query, target: args.target_node_id });
+        console.log('[AGENT] search_evidence (refinement) → target:', args.target_node_id);
+        var srResults = await agentSearchEvidence(args.query, args.target_node_id, args.purpose);
+        var srSummary = srResults.map(function(r,i){
+          return (i+1)+'. ['+r.id+'] '+r.title+(r.year?' ('+r.year+')':'');
+        }).join('\n');
+        return {
+          success: true, count: srResults.length,
+          references: srResults.map(function(r){ return {id:r.id, title:r.title, year:r.year}; }),
+          summary: srSummary,
+          instruction: 'Gunakan ref_ids di evidence_ids untuk node ' + args.target_node_id
         };
       }
 
@@ -6645,7 +6712,95 @@
     }
   }
 
-  // ── EVIDENCE SEARCH via gpt-4o-search-preview ────────────────────────
+  // ── BATCH SEARCH ─────────────────────────────────────────────────────
+  // Satu call ke gpt-4o-search-preview untuk banyak nodes sekaligus
+  async function agentSearchBatch(query, nodeIds, purpose, maxPerNode) {
+    var key = AGENT_INTERFACE.getGPTKey();
+    if (!key) return [];
+    try {
+      var nodeList = nodeIds.length ? '\nTarget nodes: ' + nodeIds.join(', ') : '';
+      var maxTotal = nodeIds.length * (maxPerNode || 3);
+      var res = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + key },
+        body: JSON.stringify({
+          model: 'gpt-4o-search-preview',
+          max_tokens: 1200,
+          web_search_options: {},
+          messages: [
+            { role: 'system', content: 'Kamu adalah research assistant SROI program CSR Indonesia. '
+              + 'Berikan maksimal ' + maxTotal + ' referensi terpercaya (pemerintah, jurnal, laporan resmi). '
+              + 'Untuk setiap referensi, tandai node mana yang paling relevan dari daftar target nodes. '
+              + 'Format setiap baris: JUDUL | TAHUN | URL | RELEVANSI | NODE_ID_TARGET'
+              + '\nPastikan URL lengkap dimulai dengan https://. Jangan tambahkan teks lain.' },
+            { role: 'user', content: query + nodeList }
+          ]
+        })
+      });
+      var data = await res.json();
+      if (data.error) { console.warn('Batch search error:', data.error.message); return []; }
+      var content = data.choices&&data.choices[0]&&data.choices[0].message&&data.choices[0].message.content || '';
+      if (!content) return [];
+
+      var lines = content.split('\n').filter(function(l){ return l.trim().length > 5; });
+      var parsed = []; var idx = 0;
+      lines.forEach(function(line) {
+        var clean = line.replace(/\*\*/g,'').replace(/^\d+\.\s*/,'').replace(/^[-•]\s*/,'').trim();
+        if (!clean || !clean.includes('|')) return;
+        var parts = clean.split('|').map(function(p){ return p.trim().replace(/\*\*/g,'').replace(/\*/g,'').trim(); });
+        var title = parts[0] || '';
+        var year  = parts[1] || '';
+        var url   = parts[2] || '';
+        var note  = parts[3] || '';
+        var forNode = parts[4] || (nodeIds.length === 1 ? nodeIds[0] : '');
+
+        // Ekstrak URL dari mana saja
+        if (!url || !url.startsWith('http')) {
+          var um = clean.match(/https?:\/\/[^\s|)>\]]+/);
+          if (um) url = um[0].replace(/[.,;)\]>]+$/,'');
+        }
+        // Ekstrak tahun
+        if (!year || !/\d{4}/.test(year)) {
+          var ym = clean.match(/\b(19|20)\d{2}\b/);
+          if (ym) year = ym[0];
+        }
+        // Bersihkan title
+        title = title.replace(/https?:\/\/[^\s]+/g,'').replace(/\b(19|20)\d{2}\b/,'').trim();
+        if (!title || title.length < 4) return;
+
+        // Cari node target yang paling cocok
+        var targetNode = forNode;
+        if (!targetNode || !nodeIds.includes(targetNode)) {
+          // Cari node yang namanya muncul di baris ini
+          targetNode = nodeIds.find(function(nid){ return clean.includes(nid); }) || (nodeIds[Math.floor(idx / maxPerNode)] || nodeIds[0] || '');
+        }
+
+        var refId = 'REF-AGT-' + (targetNode||'GEN').replace(/[^A-Z0-9]/gi,'-').toUpperCase() + '-' + (++idx);
+        var ref = { id:refId, title:title, year:year, url:url, type:'other', relevance_note:note, _source:'agent_batch', _for_node:targetNode };
+        parsed.push(ref);
+
+        // Simpan ke evidenceByNode dan global refs
+        if (targetNode) {
+          agentState.evidenceByNode[targetNode] = agentState.evidenceByNode[targetNode] || [];
+          if (!agentState.evidenceByNode[targetNode].find(function(e){ return e.id===ref.id; })) {
+            agentState.evidenceByNode[targetNode].push(ref);
+          }
+        }
+        var ont = agentState.draftOntology;
+        if (ont && ont.problem_context) {
+          if (!ont.problem_context.references) ont.problem_context.references = [];
+          if (!ont.problem_context.references.find(function(r){ return r.id===ref.id; })) {
+            ont.problem_context.references.push(ref);
+          }
+        }
+      });
+      console.log('[AGENT] batch search selesai →', parsed.length, 'referensi untuk', nodeIds.length, 'nodes');
+      return parsed;
+    } catch(err) {
+      console.warn('agentSearchBatch error:', err.message);
+      return [];
+    }
+  }
   async function agentSearchEvidence(query, targetNodeId, purpose) {
     var key = AGENT_INTERFACE.getGPTKey();
     if (!key) return [];
@@ -6778,29 +6933,39 @@
       : '';
 
     var systemPrompt = 'Kamu adalah Ontology Builder Agent untuk analisis SROI/TJSL program CSR Indonesia.\n\n' +
-      'PERANMU:\n' +
-      'Membangun ontologi lengkap dari input minimal (judul + aktivitas program) melalui tool calls.\n\n' +
-      'ALUR WAJIB untuk setiap problem node:\n' +
-      '  search_evidence(query spesifik, target_node_id="PROB-XX.X")\n' +
-      '  → kamu MENERIMA daftar referensi dengan IDs\n' +
-      '  → create_node(node_id="PROB-XX.X", evidence_ids=[IDs dari hasil search])\n' +
-      'Ulangi untuk setiap sub-problem. Kemudian buat outcome_nodes. Kemudian checkpoint().\n\n' +
-      'ATURAN search_evidence:\n' +
-      '  - target_node_id = ID node SPESIFIK yang akan dibuat (PROB-01.1, PROB-01.2, bukan PROB-01 untuk semua)\n' +
-      '  - Setelah search, kamu MENERIMA hasilnya — gunakan reference IDs di evidence_ids saat create_node\n\n' +
-      'CARA MEMANGGIL create_node:\n' +
-      '  collection: "problem_nodes"\n' +
-      '  node_id: "PROB-01.1"     ← WAJIB, string eksplisit\n' +
-      '  label: "Judul node"      ← WAJIB\n' +
-      '  evidence_ids: ["REF-AGT-PROB-01-1-1", ...]  ← dari hasil search_evidence\n' +
-      '  extra_fields: { dimension:"economic", description:"...", problem_type:"capability_gap" }\n' +
+      'ALUR BUILD FASE 1 (sampai checkpoint):\n' +
+      '1. search_batch_problems(program_context, problem_ids) — 1 call, hasilnya kamu terima\n' +
+      '2. create_node setiap problem node dengan evidence_ids dari hasil search\n' +
+      '3. create_node outcome_nodes — TANPA search\n' +
+      '4. link_nodes relasi\n' +
+      '5. checkpoint()\n\n' +
+      'ALUR BUILD FASE 2 (setelah user klik Lanjutkan):\n' +
+      '6. create_node activity, output_delivery, stakeholder, beneficiary, baseline — TANPA search\n' +
+      '7. create_node indicator_nodes — TANPA search\n' +
+      '8. Untuk setiap aspek monetisasi, buat DUA node sekaligus:\n' +
+      '   a. MON-[ASPEK]-INT (mon_source_type:"internal_report", mon_paired_with:"MON-[ASPEK]-PRX")\n' +
+      '      Label: "[Aspek] — Data Laporan Internal" — placeholder, angka diisi user\n' +
+      '   b. MON-[ASPEK]-PRX (mon_source_type:"proxy", mon_paired_with:"MON-[ASPEK]-INT")\n' +
+      '      Label: "[Aspek] — Estimasi Proxy" — butuh evidence\n' +
+      '   Panggil search_batch_proxies SEBELUM membuat semua MON-PRX\n' +
+      '9. search_batch_ddat(program_context, factors_needed) — 1 call\n' +
+      '10. create_node impact_adjustment_nodes + flag_for_verification\n' +
+      '11. create_node final_value_nodes, compute_fva, run_qa\n\n' +
+      'ATURAN SEARCH (total max 3 calls per full build):\n' +
+      '  search_batch_problems → 1 call, max 3 ref/node, URL wajib\n' +
+      '  search_batch_proxies  → 1 call, max 2 ref/proxy\n' +
+      '  search_batch_ddat     → 1 call, 1 ref per faktor\n' +
+      '  Outcome, activity, output, indicator, MON-INT → TIDAK ADA search\n\n' +
+      'CARA create_node:\n' +
+      '  node_id: "PROB-01.1" (WAJIB)\n' +
+      '  label: "Judul" (WAJIB)\n' +
+      '  evidence_ids: ["REF-AGT-..."] (dari batch search)\n' +
+      '  extra_fields: {dimension:"economic", description:"..."}\n' +
       '  reasoning: "Alasan"\n\n' +
       'ATURAN ID:\n' +
-      '  problem_nodes: PROB-01, PROB-01.1, PROB-01.2\n' +
-      '  outcome_nodes: OC-ECO-01, OC-SOC-01, OC-WB-01\n' +
-      '  activity_nodes: ACT_YYYY\n' +
-      '  indicator_nodes: IND-ECO-01\n' +
-      '  monetisation: MON-XXX | adjustment: ADJ_XXX | final_value: FV_YYYY_MON_XXX\n\n' +
+      '  problem: PROB-01, PROB-01.1 | outcome: OC-ECO-01 | activity: ACT_YYYY\n' +
+      '  MON internal: MON-JSP-INT | MON proxy: MON-JSP-PRX\n' +
+      '  adjustment: ADJ-JSP | final_value: FV_2023_MON-JSP-INT\n\n' +
       'SCHEMA:\n' + schema + ontCtx + '\n\n' +
       'Gunakan bahasa Indonesia. Respond dalam bahasa Indonesia.';
 
@@ -7212,12 +7377,37 @@
     var node = (ont[col]||[]).find(function(n){ return n && n.id === nodeId; });
     if (node) node._agent_status = 'approved';
     agentUpdateCardStatus(nodeId, 'approved');
-    // Dismiss any pending verification for this node
     agentState.pendingVerifications.forEach(function(v){
       if (v.node_id === nodeId && v.status === 'pending') v.status = 'accepted';
     });
     var verPanel = document.getElementById('ver-panel-' + nodeId);
     if (verPanel) verPanel.remove();
+
+    // Auto-delete pasangan MON (INT↔PRX)
+    if (node && node._mon_paired_with) {
+      var pairedId = node._mon_paired_with;
+      // Hapus dari draftOntology
+      if (ont[col]) ont[col] = ont[col].filter(function(n){ return !n || n.id !== pairedId; });
+      // Hapus card
+      var pairedCard = document.getElementById('anc-' + pairedId);
+      if (pairedCard) {
+        pairedCard.style.transition = 'opacity 0.3s';
+        pairedCard.style.opacity = '0';
+        setTimeout(function(){ if (pairedCard.parentNode) pairedCard.remove(); }, 300);
+      }
+      // Hapus dari relation_index
+      var ri = ont.relation_index || {};
+      Object.keys(ri).forEach(function(k) {
+        if (ri[k] && ri[k][pairedId]) delete ri[k][pairedId];
+        Object.keys(ri[k]||{}).forEach(function(fid) {
+          if (Array.isArray(ri[k][fid])) {
+            ri[k][fid] = ri[k][fid].filter(function(tid){ return tid !== pairedId; });
+          }
+        });
+      });
+      agentAppendBubble('agent', '🗑 ' + pairedId + ' dihapus otomatis (pasangan dari ' + nodeId + ' yang di-approve).');
+    }
+
     agentUpdateProgressBar();
     agentUpdateCommitBar();
   };
