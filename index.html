@@ -7033,7 +7033,9 @@
       'ATURAN TIDAK BOLEH DILANGGAR:\n' +
       '- DILARANG membuat problem_node tanpa search_batch_problems terlebih dahulu\n' +
       '- Setiap problem_node WAJIB punya evidence_ids terisi — problem tanpa evidence = ERROR\n' +
-      '- search_batch_problems HARUS dipanggil PERTAMA sebelum create_node apapun\n\n' +
+      '- search_batch_problems HARUS dipanggil PERTAMA sebelum create_node apapun\n' +
+      '- DILARANG bertanya atau klarifikasi sebelum memanggil tools — langsung action\n' +
+      '- Kalau ada ambiguitas, buat asumsi terbaik dan lanjut dengan tool calls\n\n' +
       'ALUR BUILD FASE 1 (urutan wajib, jangan dibalik):\n' +
       '1. search_batch_problems(program_context, problem_ids=["PROB-01","PROB-01.1",...]) ← PERTAMA\n' +
       '2. Dari hasil search ambil ref_ids → create_node setiap problem node dengan evidence_ids terisi\n' +
@@ -8249,12 +8251,15 @@
     var ont = agentState.draftOntology;
     var probIds = (ont && ont.problem_nodes || []).map(function(n){ return n.id; }).join(', ');
     var ocIds   = (ont && ont.outcome_nodes  || []).map(function(n){ return n.id; }).join(', ');
-    var msg = 'Checkpoint disetujui. Lanjutkan build ontologi ke layer berikutnya.\n'
-      + 'Problem nodes sudah ada: ' + (probIds || '–') + '\n'
-      + 'Outcome nodes sudah ada: ' + (ocIds   || '–') + '\n'
-      + 'Lanjutkan dengan: activity_nodes, output_delivery_nodes, stakeholder_nodes, beneficiary_nodes, baseline_nodes, indicator_nodes, '
-      + 'monetisation_pre_fix_nodes (dengan search evidence), impact_adjustment_nodes (dengan search evidence), '
-      + 'final_value_nodes, compute_fva, run_qa.';
+
+    // Pesan imperatif langsung — bukan deskripsi untuk didiskusikan
+    var msg = 'LANJUTKAN BUILD FASE 2. Langsung panggil tools, jangan bertanya.\n'
+      + 'Nodes yang sudah ada: ' + (probIds || '–') + ', ' + (ocIds || '–') + '\n'
+      + 'Mulai dengan create_node activity_nodes, lalu output_delivery_nodes, stakeholder_nodes, '
+      + 'beneficiary_nodes, baseline_nodes, indicator_nodes. '
+      + 'Kemudian search_batch_proxies → dual MON nodes (INT+PRX). '
+      + 'Kemudian search_batch_ddat → ADJ nodes. '
+      + 'Kemudian final_value_nodes → compute_fva → run_qa. LANGSUNG ACTION.';
 
     agentAppendBubble('user', '▶ Lanjutkan build');
     try {
