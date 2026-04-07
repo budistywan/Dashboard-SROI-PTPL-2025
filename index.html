@@ -6736,7 +6736,14 @@
       '- monetisation: MON-XXX\n' +
       '- adjustment: ADJ_XXX\n' +
       '- final_value: FV_YYYY_MON_XXX\n\n' +
-      'CARA MEMANGGIL create_node (PENTING):\n' +
+      'ATURAN SEARCH EVIDENCE (KRITIS):\n' +
+      '- Panggil search_evidence SEKALI PER NODE — dengan target_node_id = ID node yang sedang dibangun\n' +
+      '- JANGAN gunakan target_node_id yang sama untuk banyak node berbeda\n' +
+      '- Contoh BENAR:\n' +
+      '    search_evidence(query="masalah akses BBM nelayan", target_node_id="PROB-01.1")\n' +
+      '    search_evidence(query="keterampilan mekanik nelayan", target_node_id="PROB-01.2")\n' +
+      '- Contoh SALAH:\n' +
+      '    search_evidence(query="...", target_node_id="PROB-01") ← untuk semua sub-problem\n\n' +
       'Parameter WAJIB terpisah — JANGAN embed id di dalam extra_fields:\n' +
       '  collection: "problem_nodes"\n' +
       '  node_id: "PROB-01"          ← ID node, WAJIB\n' +
@@ -7003,33 +7010,27 @@
     var ont = agentState.draftOntology;
     var globalRefs = ont && ont.problem_context && ont.problem_context.references ? ont.problem_context.references : [];
 
-    // Cek juga di evidenceByNode (yang disimpan oleh agentSearchEvidence)
-    var nodeEvidenceObjects = agentState.evidenceByNode[nodeId] || [];
-
     var evidHtml = '';
     var evidItems = [];
 
+    // Prioritas 1: evidenceIds yang di-pass langsung (paling explicit)
     if (evidenceIds && evidenceIds.length) {
       evidenceIds.forEach(function(e) {
         if (typeof e === 'object' && e !== null) {
-          // Sudah berupa objek referensi
           evidItems.push(e);
         } else {
-          // String ref_id — lookup di global refs atau evidenceByNode
-          var ref = globalRefs.find(function(r){ return r.id === e; })
-                 || nodeEvidenceObjects.find(function(r){ return r.id === e; });
+          var ref = globalRefs.find(function(r){ return r.id === e; });
           if (ref) evidItems.push(ref);
           else evidItems.push({ id: e, title: e, url: '' });
         }
       });
     }
 
-    // Tambahkan evidence dari evidenceByNode yang belum masuk
-    nodeEvidenceObjects.forEach(function(nev) {
-      if (!evidItems.find(function(ei){ return ei.id === nev.id; })) {
-        evidItems.push(nev);
-      }
-    });
+    // Prioritas 2: data._agent_evidence_objects (disimpan langsung di node saat search selesai)
+    // HANYA jika evidItems masih kosong — tidak auto-merge agar tidak cross-contaminate
+    if (!evidItems.length && data._agent_evidence_objects && data._agent_evidence_objects.length) {
+      evidItems = data._agent_evidence_objects.slice();
+    }
 
     if (evidItems.length) {
       var items = evidItems.map(function(ref) {
