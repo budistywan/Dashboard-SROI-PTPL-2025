@@ -7011,145 +7011,462 @@
       return [];
     }
   }
-  async function agentCallGPT(userMessage, useWebSearch) {
-    var key = AGENT_INTERFACE.getGPTKey();
-    if (!key) throw new Error('OpenAI API key belum diisi. Masukkan key di panel AI Engine di atas.');
+  // ══════════════════════════════════════════════════════════════════════
+  // MULTI-AGENT ENGINE
+  // 4 agents: Orchestrator | Evidence | Mapper | QA
+  // Setiap agent = fungsi async terpisah, system prompt sendiri, stateless
+  // Orchestrator adalah satu-satunya yang punya state & memory penuh
+  // ══════════════════════════════════════════════════════════════════════
 
-    // Bangun system prompt
+  // ── Shared GPT caller (low-level, dipakai semua agent) ────────────────
+  async function _gptCall(systemPrompt, messages, tools, toolChoice, maxTokens) {
+    var key = AGENT_INTERFACE.getGPTKey();
+    if (!key) throw new Error('OpenAI API key belum diisi.');
+    var body = {
+      model: 'gpt-4o',
+      max_tokens: maxTokens || 4000,
+      temperature: 0.2,
+      messages: [{ role: 'system', content: systemPrompt }].concat(messages)
+    };
+    if (tools && tools.length) {
+      body.tools = tools;
+      body.tool_choice = toolChoice || 'auto';
+    }
+    var res = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + key },
+      body: JSON.stringify(body)
+    });
+    var data = await res.json();
+    if (data.error) throw new Error('GPT: ' + (data.error.message || 'API error'));
+    return data.choices && data.choices[0] && data.choices[0].message;
+  }
+
+  // ── AGENT 2: EVIDENCE AGENT ───────────────────────────────────────────
+  // Stateless. Menerima task, return structured evidence packets.
+  // Tidak tahu soal ontologi, tidak tahu soal UI.
+  async function runEvidenceAgent(task) {
+    /*
+      task: {
+        type: 'problem_framing' | 'proxy_basis' | 'ddat_justification' | 'revision'
+        query: string
+        node_ids: string[]   — untuk memetakan evidence ke node
+        max_per_node: number
+      }
+      return: { packets: [{node_id, claim, title, year, url, relevance, ref_id}] }
+    */
+    agentLog('evidence', 'start', task.query);
+    var results = await agentSearchBatch(
+      task.query,
+      task.node_ids || [],
+      task.type || 'problem_framing',
+      task.max_per_node || 3
+    );
+    var packets = results.map(function(r) {
+      return {
+        node_id:   r._for_node || '',
+        ref_id:    r.id,
+        title:     r.title,
+        year:      r.year,
+        url:       r.url,
+        relevance: r.relevance_note,
+        claim:     r.title + (r.relevance_note ? ' — ' + r.relevance_note : '')
+      };
+    });
+    agentLog('evidence', 'done', packets.length + ' packets');
+    return { packets: packets };
+  }
+
+  // ── AGENT 3: MAPPER AGENT ─────────────────────────────────────────────
+  // Stateless. Menerima task + evidence, return list of operations.
+  // Operasi dieksekusi oleh Orchestrator via agentToolExecutor.
+  async function runMapperAgent(task) {
+    /*
+      task: {
+        type: 'build_phase1' | 'build_phase2' | 'update_node' | 'revision'
+        instruction: string
+        evidence_packets: []
+        existing_nodes: { problem_ids, outcome_ids, ... }
+      }
+      return: { operations: [{tool, args}], summary: string }
+    */
+    agentLog('mapper', 'start', task.type);
+
     var schema = JSON.stringify(AGENT_INTERFACE.getSchema(), null, 2);
-    var ontCtx = agentState.draftOntology
-      ? '\n\nSTATE DRAFT SAAT INI:\n' + JSON.stringify({
-          problem_count:       (agentState.draftOntology.problem_nodes||[]).length,
-          activity_count:      (agentState.draftOntology.activity_nodes||[]).length,
-          outcome_count:       (agentState.draftOntology.outcome_nodes||[]).length,
-          indicator_count:     (agentState.draftOntology.indicator_nodes||[]).length,
-          monetisation_count:  (agentState.draftOntology.monetisation_pre_fix_nodes||[]).length,
-          fva_years:           (agentState.draftOntology.final_value_aggregates||[]).map(function(f){return f&&f.year;}),
-          layers_done:         agentState.buildProgress.layers_done
-        }, null, 2)
+    var evidenceCtx = task.evidence_packets && task.evidence_packets.length
+      ? '\n\nEVIDENCE TERSEDIA:\n' + task.evidence_packets.map(function(p, i) {
+          return (i+1) + '. [' + p.ref_id + '] ' + p.title + (p.year?' ('+p.year+')':'') +
+                 (p.node_id ? ' → untuk node: ' + p.node_id : '') +
+                 (p.relevance ? '\n   Relevansi: ' + p.relevance : '');
+        }).join('\n')
+      : '';
+    var existingCtx = task.existing_nodes
+      ? '\n\nNODE SUDAH ADA: ' + JSON.stringify(task.existing_nodes)
       : '';
 
-    var systemPrompt = 'Kamu adalah Ontology Builder Agent untuk analisis SROI/TJSL program CSR Indonesia.\n\n' +
-      'ATURAN TIDAK BOLEH DILANGGAR:\n' +
-      '- DILARANG membuat problem_node tanpa search_batch_problems terlebih dahulu\n' +
-      '- Setiap problem_node WAJIB punya evidence_ids terisi — problem tanpa evidence = ERROR\n' +
-      '- search_batch_problems HARUS dipanggil PERTAMA sebelum create_node apapun\n' +
-      '- DILARANG bertanya atau klarifikasi sebelum memanggil tools — langsung action\n' +
-      '- Kalau ada ambiguitas, buat asumsi terbaik dan lanjut dengan tool calls\n\n' +
-      'ALUR BUILD FASE 1 (urutan wajib, jangan dibalik):\n' +
-      '1. search_batch_problems(program_context, problem_ids=["PROB-01","PROB-01.1",...]) ← PERTAMA\n' +
-      '2. Dari hasil search ambil ref_ids → create_node setiap problem node dengan evidence_ids terisi\n' +
-      '3. create_node outcome_nodes — TANPA search, evidence_ids=[]\n' +
-      '4. link_nodes relasi\n' +
-      '5. checkpoint()\n\n' +
-      'ALUR BUILD FASE 2 (setelah user klik Lanjutkan):\n' +
-      '6. create_node activity, output_delivery, stakeholder, beneficiary, baseline — TANPA search\n' +
-      '7. create_node indicator_nodes — TANPA search\n' +
-      '8. Untuk setiap aspek monetisasi, buat DUA node:\n' +
-      '   MON-[ASPEK]-INT (internal_report, placeholder) + MON-[ASPEK]-PRX (proxy + evidence)\n' +
-      '   search_batch_proxies SEBELUM buat semua MON-PRX\n' +
-      '9. search_batch_ddat → create_node ADJ + flag_for_verification\n' +
-      '10. final_value_nodes, compute_fva, run_qa\n\n' +
-      'ATURAN REFINEMENT:\n' +
-      '  Tambah problem → search_batch_problems dulu → create_node dengan evidence_ids\n' +
-      '  Tambah outcome → create_node outcome → dual MON (INT+PRX dengan search_batch_proxies)\n' +
-      '  Hapus node → delete_node → lapor downstream\n' +
-      '  Cari evidence → search_evidence → update_node\n\n' +
-      'ATURAN SEARCH:\n' +
-      '  search_batch_problems → WAJIB untuk problem, 1 call, max 3 ref/node, URL wajib ada\n' +
-      '  search_batch_proxies  → 1 call, max 2 ref/proxy\n' +
-      '  search_batch_ddat     → 1 call, 1 ref/faktor\n' +
-      '  Outcome, activity, output, indicator, MON-INT → TIDAK ADA search\n\n' +
-      'CARA create_node:\n' +
-      '  node_id:"PROB-01.1" (WAJIB) | label:"Judul" (WAJIB)\n' +
-      '  evidence_ids:["REF-AGT-PROB-01-1-1","REF-AGT-PROB-01-1-2"] ← dari hasil search\n' +
-      '  extra_fields:{dimension:"economic", description:"..."} | reasoning:"Alasan"\n\n' +
-      'ATURAN ID:\n' +
-      '  problem:PROB-01,PROB-01.1 | outcome:OC-ECO-01 | activity:ACT_YYYY\n' +
-      '  MON internal:MON-JSP-INT | MON proxy:MON-JSP-PRX | adjustment:ADJ-JSP\n\n' +
-      'SCHEMA:\n' + schema + ontCtx + '\n\n' +
-      'Gunakan bahasa Indonesia.';
+    var systemPrompt = 'Kamu adalah Ontology Mapper Agent untuk SROI/TJSL program CSR Indonesia.\n\n' +
+      'PERANMU: Hanya membuat dan menghubungkan nodes. Tidak search, tidak bertanya, tidak ngobrol.\n' +
+      'OUTPUT: Hanya tool calls. Tidak ada teks bebas.\n\n' +
+      'ATURAN WAJIB:\n' +
+      '- Setiap problem_node WAJIB pakai evidence_ids dari evidence yang tersedia\n' +
+      '- node_id WAJIB eksplisit (PROB-01, PROB-01.1, OC-ECO-01, dst)\n' +
+      '- Untuk MON: selalu buat PASANGAN INT + PRX\n' +
+      '  MON-[ASPEK]-INT (mon_source_type:internal_report, mon_paired_with:MON-[ASPEK]-PRX)\n' +
+      '  MON-[ASPEK]-PRX (mon_source_type:proxy, mon_paired_with:MON-[ASPEK]-INT)\n\n' +
+      'SCHEMA ONTOLOGI:\n' + schema + evidenceCtx + existingCtx;
 
-    // Tambahkan pesan user ke history
-    agentState.agentHistory.push({ role: 'user', content: userMessage });
+    // Mapper pakai tool_choice: required — wajib panggil tools, tidak boleh ngobrol
+    var mapperTools = AGENT_TOOL_DEFS.filter(function(t) {
+      return ['create_node','link_nodes','update_node','flag_for_verification',
+              'compute_fva','checkpoint'].includes(t.function.name);
+    });
 
-    // Tools yang dipakai — web_search TIDAK masuk tools[] OpenAI standard
-    // Search dilakukan via model gpt-4o-search-preview di agentSearchEvidence()
-    var tools = AGENT_TOOL_DEFS.slice();
+    var messages = [{ role: 'user', content: task.instruction }];
+    var allToolCalls = [];
+    var maxIter = 20;
+    var iter = 0;
 
-    var maxIterations = 30; // safety limit
-    var iteration = 0;
+    while (iter < maxIter) {
+      iter++;
+      var msg = await _gptCall(systemPrompt, messages, mapperTools, 'required', 4000);
+      if (!msg) break;
 
-    while (iteration < maxIterations) {
-      iteration++;
+      if (msg.content) agentLog('mapper', 'text', msg.content.slice(0, 80));
+      messages.push(msg);
 
-      var body = {
-        model: 'gpt-4o',
-        max_tokens: 4000,
-        temperature: 0.3,
-        messages: [{ role: 'system', content: systemPrompt }].concat(agentState.agentHistory),
-        tools: tools,
-        tool_choice: 'auto'
-      };
+      if (!msg.tool_calls || !msg.tool_calls.length) break;
 
-      var res = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + key },
-        body: JSON.stringify(body)
-      });
-      var data = await res.json();
-      if (data.error) throw new Error('GPT: ' + (data.error.message || 'API error'));
-
-      var choice = data.choices && data.choices[0];
-      if (!choice) throw new Error('GPT: response kosong');
-
-      var msg = choice.message;
-      agentState.agentHistory.push(msg);
-
-      // Kalau ada text content — tampilkan ke chat
-      if (msg.content) {
-        agentAppendBubble('agent', msg.content);
-      }
-
-      // Kalau finish_reason = stop — selesai
-      if (choice.finish_reason === 'stop' || !msg.tool_calls || !msg.tool_calls.length) {
-        break;
-      }
-
-      // Proses setiap tool call
       var toolResults = [];
-      for (var ti = 0; ti < msg.tool_calls.length; ti++) {
-        var tc = msg.tool_calls[ti];
+      var shouldPause = false;
+
+      for (var i = 0; i < msg.tool_calls.length; i++) {
+        var tc = msg.tool_calls[i];
         var tcName = tc.function.name;
         var tcArgs;
         try { tcArgs = JSON.parse(tc.function.arguments); } catch(e) { tcArgs = {}; }
 
-        // Log tool call ke chat
+        agentLog('mapper', 'tool', tcName + ' → ' + (tcArgs.node_id || tcArgs.from_id || tcArgs.scope || ''));
         agentAppendToolCall(tcName, tcArgs);
 
-        // Execute tool (async — search_evidence akan await hasil sebelum lanjut)
         var result = await agentToolExecutor(tcName, tcArgs);
+        allToolCalls.push({ tool: tcName, args: tcArgs, result: result });
 
-        toolResults.push({
-          role: 'tool',
-          tool_call_id: tc.id,
-          content: JSON.stringify(result)
-        });
+        toolResults.push({ role: 'tool', tool_call_id: tc.id, content: JSON.stringify(result) });
 
-        // Kalau checkpoint atau blocking verification — pause loop
-        if (tcName === 'checkpoint' || (tcName === 'flag_for_verification' && tcArgs.blocking)) {
-          agentState.agentHistory = agentState.agentHistory.concat(toolResults);
-          return; // pause — tunggu human
-        }
+        if (tcName === 'checkpoint') { shouldPause = true; }
       }
 
-      // Push semua tool results ke history sekaligus
-      agentState.agentHistory = agentState.agentHistory.concat(toolResults);
+      messages = messages.concat(toolResults);
+      if (shouldPause) break;
     }
 
-    // Update UI state
-    agentUpdateModeBar(agentState.mode === 'building' ? 'reviewing' : agentState.mode);
+    var nodeCount = allToolCalls.filter(function(op){ return op.tool === 'create_node'; }).length;
+    var summary = 'Mapper selesai: ' + nodeCount + ' nodes dibuat, ' + iter + ' iterasi.';
+    agentLog('mapper', 'done', summary);
+    return { operations: allToolCalls, summary: summary };
+  }
+
+  // ── AGENT 4: QA AGENT ────────────────────────────────────────────────
+  // Stateless. Cek konsistensi ontologi draft, return flags + scores.
+  async function runQAAgent(task) {
+    /*
+      task: {
+        scope: 'full' | 'problem' | 'monetisation' | 'relations'
+        focus_nodes: string[]  — optional, untuk revisi targeted
+        changed_node_id: string  — optional, untuk revisi
+      }
+      return: { flags: [], scores: {node_id: score}, needs_revision: bool }
+    */
+    agentLog('qa', 'start', task.scope || 'full');
+
+    // JS-level QA (deterministik, tidak pakai GPT)
+    var jsFlags = agentRunQALogic(task.scope || 'full');
+
+    // Tambahkan QA berbasis GPT untuk logic check yang lebih dalam
+    var ont = agentState.draftOntology;
+    var probNodes = (ont && ont.problem_nodes || []).map(function(n) {
+      return { id: n.id, label: n.label, evidence_count: (n._agent_evidence||[]).length };
+    });
+    var ocNodes = (ont && ont.outcome_nodes || []).map(function(n) {
+      return { id: n.id, label: n.label, dimension: n.dimension };
+    });
+
+    var systemPrompt = 'Kamu adalah QA Agent untuk ontologi SROI/TJSL.\n\n' +
+      'TUGASMU: Periksa konsistensi chain logika dan beri confidence score.\n' +
+      'OUTPUT FORMAT (JSON saja, tanpa teks lain):\n' +
+      '{\n' +
+      '  "flags": [{"node_id":"...","severity":"error|warning|info","message":"..."}],\n' +
+      '  "scores": {"PROB-01": 0.85, "OC-ECO-01": 0.72},\n' +
+      '  "needs_revision": true/false,\n' +
+      '  "summary": "ringkasan singkat"\n' +
+      '}';
+
+    var qaCtx = 'Problem nodes: ' + JSON.stringify(probNodes) +
+      '\nOutcome nodes: ' + JSON.stringify(ocNodes) +
+      (task.changed_node_id ? '\nNode yang baru diubah: ' + task.changed_node_id : '') +
+      '\nFlags dari JS checker: ' + JSON.stringify(jsFlags.slice(0,5));
+
+    var gptFlags = [], scores = {}, needsRevision = false, summary = '';
+    try {
+      var qaMsg = await _gptCall(systemPrompt, [{ role: 'user', content: qaCtx }], null, null, 1000);
+      if (qaMsg && qaMsg.content) {
+        var cleaned = qaMsg.content.replace(/^```json\s*/,'').replace(/```\s*$/,'').trim();
+        var parsed = JSON.parse(cleaned);
+        gptFlags = parsed.flags || [];
+        scores = parsed.scores || {};
+        needsRevision = parsed.needs_revision || false;
+        summary = parsed.summary || '';
+      }
+    } catch(e) { console.warn('QA GPT parse error:', e.message); }
+
+    // Merge JS flags + GPT flags
+    var allFlags = jsFlags.map(function(f) {
+      return { node_id: f.node_id, severity: f.severity, message: f.message, source: 'js' };
+    }).concat(gptFlags.map(function(f) {
+      return { node_id: f.node_id, severity: f.severity, message: f.message, source: 'gpt' };
+    }));
+
+    agentLog('qa', 'done', allFlags.length + ' flags, needs_revision:' + needsRevision);
+    agentRenderQAFlags(allFlags);
+
+    // Update card badges dengan score
+    Object.keys(scores).forEach(function(nodeId) {
+      var score = scores[nodeId];
+      var card = document.getElementById('anc-' + nodeId);
+      if (card) {
+        var badge = card.querySelector('.anc-status-badge');
+        if (badge && score < 0.7) {
+          badge.style.background = '#fef3c7';
+          badge.style.color = '#92400e';
+          badge.textContent = '⚠ ' + Math.round(score*100) + '%';
+        }
+      }
+    });
+
+    return { flags: allFlags, scores: scores, needs_revision: needsRevision, summary: summary };
+  }
+
+  // ── AGENT 1: ORCHESTRATOR ────────────────────────────────────────────
+  // Satu-satunya yang punya state penuh (agentState.agentHistory).
+  // Memutuskan: agent mana, kapan, berapa iterasi.
+  // Tidak menulis nodes langsung — semua lewat Mapper.
+  async function runOrchestrator(userMessage) {
+    var key = AGENT_INTERFACE.getGPTKey();
+    if (!key) throw new Error('OpenAI API key belum diisi.');
+
+    agentLog('orchestrator', 'start', userMessage.slice(0, 60));
+    agentUpdateModeBar('building', 'Orchestrator', 'Menganalisis...');
+
+    // Shortcut: __SYSTEM__ messages langsung dieksekusi tanpa planning
+    if (userMessage.startsWith('__SYSTEM__:')) {
+      var sysMsg = userMessage.replace('__SYSTEM__:', '').trim();
+      var isBuildPhase2 = sysMsg.includes('build_phase2');
+      var ont2 = agentState.draftOntology;
+      if (isBuildPhase2 && ont2) {
+        agentUpdateModeBar('building', '🗂 Mapper Agent', 'Build fase 2...');
+        var mapResult2 = await runMapperAgent({
+          type: 'build_phase2',
+          instruction: sysMsg,
+          evidence_packets: [],
+          existing_nodes: {
+            problem_ids: (ont2.problem_nodes||[]).map(function(n){return n.id;}),
+            outcome_ids:  (ont2.outcome_nodes||[]).map(function(n){return n.id;})
+          }
+        });
+        agentUpdateModeBar('reviewing', 'Selesai', 'Review cards di kanan');
+        agentUpdateCommitBar();
+        return;
+      }
+    }
+
+    // Bangun context untuk Orchestrator
+    var ont = agentState.draftOntology;
+    var ontSummary = ont ? JSON.stringify({
+      problem_count:      (ont.problem_nodes||[]).length,
+      outcome_count:      (ont.outcome_nodes||[]).length,
+      activity_count:     (ont.activity_nodes||[]).length,
+      indicator_count:    (ont.indicator_nodes||[]).length,
+      mon_count:          (ont.monetisation_pre_fix_nodes||[]).length,
+      adj_count:          (ont.impact_adjustment_nodes||[]).length,
+      fva_years:          (ont.final_value_aggregates||[]).map(function(f){return f&&f.year;}),
+      layers_done:        agentState.buildProgress.layers_done,
+      problem_ids:        (ont.problem_nodes||[]).map(function(n){return n.id;}),
+      outcome_ids:        (ont.outcome_nodes||[]).map(function(n){return n.id;})
+    }) : 'null';
+
+    var orchSystemPrompt = 'Kamu adalah Orchestrator Agent untuk sistem SROI/TJSL.\n\n' +
+      'PERANMU: Memutuskan urutan kerja, bukan menulis konten.\n' +
+      'Kamu mengkoordinasi 3 agent lain: Evidence Agent, Mapper Agent, QA Agent.\n\n' +
+      'OUTPUT: JSON plan yang akan dieksekusi sistem. Format:\n' +
+      '{\n' +
+      '  "intent": "build_phase1|build_phase2|revision_minor|revision_medium|revision_major|qa_only|user_question",\n' +
+      '  "steps": [\n' +
+      '    {"agent":"evidence", "task":{"type":"problem_framing","query":"...","node_ids":["PROB-01.1"],"max_per_node":3}},\n' +
+      '    {"agent":"mapper",   "task":{"type":"build_phase1","instruction":"...","existing_nodes":{}}},\n' +
+      '    {"agent":"qa",       "task":{"scope":"problem"}},\n' +
+      '    {"agent":"evidence", "task":{"type":"proxy_basis","query":"...","node_ids":["MON-PRX"],"max_per_node":2}}\n' +
+      '  ],\n' +
+      '  "reply_to_user": "pesan singkat ke user tentang apa yang akan dilakukan"\n' +
+      '}\n\n' +
+      'INTENT MAPPING:\n' +
+      '- Input pertama (program baru) → build_phase1\n' +
+      '- Setelah checkpoint disetujui → build_phase2\n' +
+      '- User ganti label/deskripsi → revision_minor (mapper saja)\n' +
+      '- User ganti substansi node → revision_medium (evidence + mapper + qa)\n' +
+      '- User hapus/tambah node kritis → revision_major (qa dulu + evidence + mapper + qa)\n' +
+      '- User minta cek konsistensi → qa_only\n' +
+      '- User bertanya/ngobrol → user_question (tidak ada steps)\n\n' +
+      'ATURAN EVIDENCE:\n' +
+      '- problem_framing: max 3 ref/node\n' +
+      '- proxy_basis: max 2 ref/proxy\n' +
+      '- ddat_justification: max 1 ref/faktor\n' +
+      '- revision: max 3 ref\n\n' +
+      'STATE ONTOLOGI SAAT INI:\n' + ontSummary;
+
+    // Tambahkan pesan ke history orchestrator
+    agentState.agentHistory.push({ role: 'user', content: userMessage });
+
+    // Orchestrator planning — satu call, JSON output
+    var planMsg = await _gptCall(
+      orchSystemPrompt,
+      agentState.agentHistory,
+      null, null, 1500
+    );
+
+    if (!planMsg || !planMsg.content) throw new Error('Orchestrator tidak menghasilkan plan.');
+
+    agentState.agentHistory.push(planMsg);
+
+    // Parse plan
+    var plan;
+    try {
+      var cleaned = planMsg.content.replace(/^```json\s*/,'').replace(/```\s*$/,'').trim();
+      plan = JSON.parse(cleaned);
+    } catch(e) {
+      // Kalau tidak bisa parse, coba ekstrak JSON dari dalam teks
+      var jsonMatch = planMsg.content.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        try { plan = JSON.parse(jsonMatch[0]); } catch(e2) {}
+      }
+    }
+
+    if (!plan) {
+      // Fallback: kalau orchestrator gagal parse, tampilkan pesan ke user
+      agentAppendBubble('agent', planMsg.content);
+      return;
+    }
+
+    agentLog('orchestrator', 'plan', plan.intent + ' | ' + (plan.steps||[]).length + ' steps');
+
+    // Tampilkan reply ke user
+    if (plan.reply_to_user) {
+      agentAppendBubble('agent', plan.reply_to_user);
+    }
+
+    // Kalau hanya user_question — selesai
+    if (plan.intent === 'user_question' || !plan.steps || !plan.steps.length) {
+      agentUpdateModeBar('idle', 'Siap', '');
+      return;
+    }
+
+    // ── Eksekusi steps ──────────────────────────────────────────────────
+    var evidencePackets = []; // Akumulasi evidence lintas steps
+
+    for (var si = 0; si < plan.steps.length; si++) {
+      var step = plan.steps[si];
+      agentLog('orchestrator', 'step', (si+1) + '/' + plan.steps.length + ': ' + step.agent);
+      agentUpdateModeBar('building',
+        step.agent === 'evidence' ? '🔍 Evidence Agent' :
+        step.agent === 'mapper'   ? '🗂 Mapper Agent' :
+        step.agent === 'qa'       ? '✅ QA Agent' : 'Agent',
+        step.agent === 'evidence' ? (step.task && step.task.query || '').slice(0,50) :
+        step.agent === 'mapper'   ? (step.task && step.task.type || '') :
+        'Memeriksa konsistensi...'
+      );
+
+      if (step.agent === 'evidence') {
+        // Jalankan Evidence Agent
+        var evTask = Object.assign({}, step.task);
+        var evResult = await runEvidenceAgent(evTask);
+        // Akumulasi packets untuk Mapper berikutnya
+        evidencePackets = evidencePackets.concat(evResult.packets || []);
+        agentLog('orchestrator', 'evidence-done', evResult.packets.length + ' packets');
+
+      } else if (step.agent === 'mapper') {
+        // Inject accumulated evidence ke mapper task
+        var mapTask = Object.assign({}, step.task);
+        mapTask.evidence_packets = evidencePackets;
+        mapTask.existing_nodes = {
+          problem_ids: (ont && ont.problem_nodes||[]).map(function(n){return n.id;}),
+          outcome_ids:  (ont && ont.outcome_nodes||[]).map(function(n){return n.id;})
+        };
+        var mapResult = await runMapperAgent(mapTask);
+
+        // Setelah mapper, reset evidence packets (sudah dikonsumsi)
+        evidencePackets = [];
+
+        // Kalau mapper hit checkpoint — pause dan tunggu user
+        var hitCheckpoint = mapResult.operations.some(function(op){ return op.tool === 'checkpoint'; });
+        if (hitCheckpoint) {
+          agentLog('orchestrator', 'checkpoint', 'Pause — tunggu user');
+          agentUpdateModeBar('reviewing', 'Checkpoint', 'Review draft awal');
+          return; // Pause — agentContinueBuild akan melanjutkan
+        }
+
+      } else if (step.agent === 'qa') {
+        // Jalankan QA Agent
+        var qaTask = Object.assign({}, step.task);
+        var qaResult = await runQAAgent(qaTask);
+
+        // Kalau QA butuh revisi dan ada step mapper setelahnya — inject flags
+        if (qaResult.needs_revision) {
+          agentLog('orchestrator', 'qa-needs-revision', qaResult.flags.length + ' flags');
+          // Iterasi: cari apakah ada mapper step berikutnya yang bisa handle
+          var nextMapper = plan.steps.slice(si+1).find(function(s){ return s.agent === 'mapper'; });
+          if (nextMapper && nextMapper.task) {
+            nextMapper.task.qa_flags = qaResult.flags;
+            nextMapper.task.instruction = (nextMapper.task.instruction || '') +
+              '\nPerhatian dari QA: ' + qaResult.flags.slice(0,3).map(function(f){ return f.message; }).join('; ');
+          }
+        }
+
+        // Update commit bar
+        agentUpdateCommitBar();
+      }
+    }
+
+    // Selesai semua steps
+    agentUpdateModeBar('reviewing', 'Selesai', 'Review cards di kanan');
     agentUpdateCommitBar();
+    agentLog('orchestrator', 'done', 'Semua steps selesai');
+  }
+
+  // ── Agent logger (tampil di chat sebagai tool-call bubble) ────────────
+  function agentLog(agentName, phase, detail) {
+    var icons = { orchestrator: '🎯', evidence: '🔍', mapper: '🗂', qa: '✅' };
+    var icon = icons[agentName] || '⚙';
+    if (phase === 'tool') {
+      // Tool calls sudah ditampilkan oleh agentAppendToolCall, skip
+      return;
+    }
+    if (phase === 'text') return; // Skip intermediate text
+    var scroll = document.getElementById('agentChatScroll');
+    if (!scroll) return;
+    var div = document.createElement('div');
+    div.className = 'agent-bubble tool-call';
+    div.style.cssText = 'border-color:' + (
+      agentName==='orchestrator' ? '#c7d2fe' :
+      agentName==='evidence'     ? '#bae6fd' :
+      agentName==='mapper'       ? '#a7f3d0' : '#fde68a') + ';';
+    div.innerHTML = '<span class="tool-name">' + icon + ' ' + agentName + '</span>'
+      + esc(phase + (detail ? ': ' + detail : ''));
+    scroll.appendChild(div);
+    scroll.scrollTop = scroll.scrollHeight;
+  }
+
+  // ── Legacy agentCallGPT — sekarang jadi wrapper ke Orchestrator ───────
+  async function agentCallGPT(userMessage) {
+    return runOrchestrator(userMessage);
   }
 
   // ── IMPACT ASSESSOR ───────────────────────────────────────────────────
@@ -8246,24 +8563,21 @@
   async function agentContinueBuild() {
     var sendBtn = document.getElementById('agentSendBtn');
     if (sendBtn) { sendBtn.disabled = true; sendBtn.textContent = '...'; }
-    agentUpdateModeBar('building', 'Melanjutkan Build', 'Agent mengerjakan layer berikutnya...');
 
     var ont = agentState.draftOntology;
     var probIds = (ont && ont.problem_nodes || []).map(function(n){ return n.id; }).join(', ');
     var ocIds   = (ont && ont.outcome_nodes  || []).map(function(n){ return n.id; }).join(', ');
 
-    // Pesan imperatif langsung — bukan deskripsi untuk didiskusikan
-    var msg = 'LANJUTKAN BUILD FASE 2. Langsung panggil tools, jangan bertanya.\n'
-      + 'Nodes yang sudah ada: ' + (probIds || '–') + ', ' + (ocIds || '–') + '\n'
-      + 'Mulai dengan create_node activity_nodes, lalu output_delivery_nodes, stakeholder_nodes, '
-      + 'beneficiary_nodes, baseline_nodes, indicator_nodes. '
-      + 'Kemudian search_batch_proxies → dual MON nodes (INT+PRX). '
-      + 'Kemudian search_batch_ddat → ADJ nodes. '
-      + 'Kemudian final_value_nodes → compute_fva → run_qa. LANGSUNG ACTION.';
+    agentAppendBubble('user', '▶ Lanjutkan build fase 2');
 
-    agentAppendBubble('user', '▶ Lanjutkan build');
     try {
-      await agentCallGPT(msg);
+      // Kirim ke Orchestrator — intent eksplisit build_phase2
+      await runOrchestrator(
+        '__SYSTEM__: build_phase2. ' +
+        'Problem nodes: ' + (probIds || '–') + '. ' +
+        'Outcome nodes: ' + (ocIds || '–') + '. ' +
+        'Lanjutkan ke activity, output, stakeholder, beneficiary, baseline, indicator, MON (dual INT+PRX), ADJ, FV, FVA, QA.'
+      );
     } catch(err) {
       agentAppendBubble('agent', '⚠ Error: ' + err.message);
     }
@@ -8277,7 +8591,7 @@
     agentUpdateModeBar('building', 'Memproses', '');
     agentAppendBubble('user', msg);
     try {
-      await agentCallGPT(msg);
+      await runOrchestrator(msg);
     } catch(err) {
       agentAppendBubble('agent', '⚠ Error: ' + err.message);
     }
