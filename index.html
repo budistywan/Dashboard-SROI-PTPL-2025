@@ -6458,21 +6458,22 @@
       case 'create_node': {
         var col = args.collection;
         var data = args.data || {};
-        // Pastikan _agent_status ada
         if (!data._agent_status) data._agent_status = 'draft';
         data._agent_reasoning = args.reasoning || '';
         data._agent_evidence  = args.evidence_ids || [];
         if (!Array.isArray(ont[col])) ont[col] = [];
         // Cek duplikat ID
         var existing = data.id && ont[col].find(function(n){ return n && n.id === data.id; });
-        if (existing) return { error: 'Node ' + data.id + ' sudah ada di ' + col };
+        if (existing) {
+          console.warn('[AGENT] Duplikat ID:', data.id, 'di', col, '— skip');
+          return { error: 'Node ' + data.id + ' sudah ada di ' + col };
+        }
+        console.log('[AGENT] create_node:', data.id, 'di', col, '| label:', data.label||data.name||data.aspect||'?');
         ont[col].push(data);
-        // Simpan evidence ke cache
         if (data.id && args.evidence_ids && args.evidence_ids.length) {
           agentState.evidenceByNode[data.id] = agentState.evidenceByNode[data.id] || [];
         }
         agentState.opLog.push({ id: opId, tool: 'create_node', collection: col, node_id: data.id, reasoning: args.reasoning });
-        // Render card
         agentRenderCard(data.id, col, data, args.reasoning, args.evidence_ids || []);
         return { success: true, node_id: data.id, collection: col };
       }
@@ -7030,7 +7031,9 @@
       + '</div></div>';
 
     var scroll = document.getElementById('agentCardsScroll');
-    if (!scroll) return;
+    if (!scroll) { console.error('[AGENT] agentCardsScroll tidak ditemukan!'); return; }
+
+    console.log('[AGENT] renderCard:', nodeId, '| existing:', !!existingCard, '| scroll children:', scroll.children.length);
 
     // Hapus empty state
     var emptyEl = document.getElementById('agentCardsEmpty');
@@ -7060,7 +7063,12 @@
       var tempDiv2 = document.createElement('div');
       tempDiv2.innerHTML = html;
       var cardEl = tempDiv2.querySelector('.agent-node-card') || tempDiv2.firstElementChild;
-      if (cardEl) layerGroup.appendChild(cardEl);
+      if (cardEl) {
+        layerGroup.appendChild(cardEl);
+        console.log('[AGENT] appended card:', nodeId, '| layerGroup children:', layerGroup.children.length);
+      } else {
+        console.error('[AGENT] cardEl null untuk:', nodeId, '| html snippet:', html.slice(0,100));
+      }
     }
 
     agentUpdateProgressBar();
