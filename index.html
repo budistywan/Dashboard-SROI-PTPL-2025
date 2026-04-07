@@ -7093,27 +7093,55 @@
     agentLog('mapper', 'start', task.type);
 
     var schema = JSON.stringify(AGENT_INTERFACE.getSchema(), null, 2);
-    var evidenceCtx = task.evidence_packets && task.evidence_packets.length
-      ? '\n\nEVIDENCE TERSEDIA:\n' + task.evidence_packets.map(function(p, i) {
-          return (i+1) + '. [' + p.ref_id + '] ' + p.title + (p.year?' ('+p.year+')':'') +
-                 (p.node_id ? ' → untuk node: ' + p.node_id : '') +
-                 (p.relevance ? '\n   Relevansi: ' + p.relevance : '');
-        }).join('\n')
-      : '';
-    var existingCtx = task.existing_nodes
-      ? '\n\nNODE SUDAH ADA: ' + JSON.stringify(task.existing_nodes)
+
+    // Build evidence context dengan ref_ids yang eksplisit untuk dipakai di evidence_ids
+    var evidenceCtx = '';
+    if (task.evidence_packets && task.evidence_packets.length) {
+      evidenceCtx = '\n\nEVIDENCE TERSEDIA (gunakan ref_id di field evidence_ids):\n';
+      evidenceCtx += task.evidence_packets.map(function(p, i) {
+        return (i+1) + '. ref_id:"' + p.ref_id + '" | ' + p.title +
+               (p.year ? ' (' + p.year + ')' : '') +
+               (p.url ? ' | URL: ' + p.url : '') +
+               (p.node_id ? '\n   → paling relevan untuk node: ' + p.node_id : '') +
+               (p.relevance ? '\n   Relevansi: ' + p.relevance : '');
+      }).join('\n\n');
+      evidenceCtx += '\n\nCara pakai: create_node(..., evidence_ids:["' +
+        task.evidence_packets.slice(0,2).map(function(p){ return p.ref_id; }).join('","') + '",...])\n';
+    }
+
+    // Build planned nodes context
+    var plannedCtx = '';
+    if (task.planned_nodes) {
+      plannedCtx = '\n\nNODE YANG HARUS DIBUAT (WAJIB semua):\n';
+      if (task.planned_nodes.problem_ids) {
+        plannedCtx += 'Problem nodes: ' + task.planned_nodes.problem_ids.join(', ') + '\n';
+        plannedCtx += '- ' + task.planned_nodes.problem_ids[0] + ': root problem (parent_id:null)\n';
+        task.planned_nodes.problem_ids.slice(1).forEach(function(id) {
+          plannedCtx += '- ' + id + ': sub-problem (parent_id:' + task.planned_nodes.problem_ids[0] + ')\n';
+        });
+      }
+      if (task.planned_nodes.outcome_ids) {
+        plannedCtx += 'Outcome nodes: ' + task.planned_nodes.outcome_ids.join(', ') + '\n';
+      }
+    }
+
+    var existingCtx = task.existing_nodes && (
+      (task.existing_nodes.problem_ids||[]).length || (task.existing_nodes.outcome_ids||[]).length)
+      ? '\n\nNODE SUDAH ADA (jangan duplikat): ' + JSON.stringify(task.existing_nodes)
       : '';
 
     var systemPrompt = 'Kamu adalah Ontology Mapper Agent untuk SROI/TJSL program CSR Indonesia.\n\n' +
-      'PERANMU: Hanya membuat dan menghubungkan nodes. Tidak search, tidak bertanya, tidak ngobrol.\n' +
+      'PERANMU: Buat dan hubungkan nodes sesuai daftar yang diberikan. Tidak search, tidak bertanya, tidak ngobrol.\n' +
       'OUTPUT: Hanya tool calls. Tidak ada teks bebas.\n\n' +
       'ATURAN WAJIB:\n' +
-      '- Setiap problem_node WAJIB pakai evidence_ids dari evidence yang tersedia\n' +
-      '- node_id WAJIB eksplisit (PROB-01, PROB-01.1, OC-ECO-01, dst)\n' +
+      '- Buat SEMUA node yang ada di daftar NODE YANG HARUS DIBUAT\n' +
+      '- Setiap problem_node WAJIB pakai evidence_ids dari ref_id yang tersedia di atas\n' +
+      '- node_id WAJIB persis seperti yang tercantum di daftar\n' +
       '- Untuk MON: selalu buat PASANGAN INT + PRX\n' +
-      '  MON-[ASPEK]-INT (mon_source_type:internal_report, mon_paired_with:MON-[ASPEK]-PRX)\n' +
-      '  MON-[ASPEK]-PRX (mon_source_type:proxy, mon_paired_with:MON-[ASPEK]-INT)\n\n' +
-      'SCHEMA ONTOLOGI:\n' + schema + evidenceCtx + existingCtx;
+      '  MON-[ASPEK]-INT (mon_source_type:"internal_report", mon_paired_with:"MON-[ASPEK]-PRX")\n' +
+      '  MON-[ASPEK]-PRX (mon_source_type:"proxy", mon_paired_with:"MON-[ASPEK]-INT")\n' +
+      '- Setelah semua node dibuat: panggil link_nodes untuk relasi, lalu checkpoint()\n\n' +
+      'SCHEMA ONTOLOGI:\n' + schema + evidenceCtx + plannedCtx + existingCtx;
 
     // Mapper pakai tool_choice: required — wajib panggil tools, tidak boleh ngobrol
     var mapperTools = AGENT_TOOL_DEFS.filter(function(t) {
@@ -7295,32 +7323,59 @@
     }) : 'null';
 
     var orchSystemPrompt = 'Kamu adalah Orchestrator Agent untuk sistem SROI/TJSL.\n\n' +
-      'PERANMU: Memutuskan urutan kerja, bukan menulis konten.\n' +
-      'Kamu mengkoordinasi 3 agent lain: Evidence Agent, Mapper Agent, QA Agent.\n\n' +
-      'OUTPUT: JSON plan yang akan dieksekusi sistem. Format:\n' +
+      'PERANMU: Memutuskan urutan kerja dan membuat plan detail, bukan menulis konten.\n' +
+      'Kamu mengkoordinasi: Evidence Agent, Mapper Agent, QA Agent.\n\n' +
+      'OUTPUT: JSON plan. Format WAJIB:\n' +
       '{\n' +
-      '  "intent": "build_phase1|build_phase2|revision_minor|revision_medium|revision_major|qa_only|user_question",\n' +
+      '  "intent": "build_phase1|revision_minor|revision_medium|revision_major|qa_only|user_question",\n' +
       '  "steps": [\n' +
-      '    {"agent":"evidence", "task":{"type":"problem_framing","query":"...","node_ids":["PROB-01.1"],"max_per_node":3}},\n' +
-      '    {"agent":"mapper",   "task":{"type":"build_phase1","instruction":"...","existing_nodes":{}}},\n' +
-      '    {"agent":"qa",       "task":{"scope":"problem"}},\n' +
-      '    {"agent":"evidence", "task":{"type":"proxy_basis","query":"...","node_ids":["MON-PRX"],"max_per_node":2}}\n' +
+      '    {\n' +
+      '      "agent": "evidence",\n' +
+      '      "task": {\n' +
+      '        "type": "problem_framing",\n' +
+      '        "query": "query spesifik tentang masalah program ini",\n' +
+      '        "node_ids": ["PROB-01","PROB-01.1","PROB-01.2","PROB-01.3"],\n' +
+      '        "max_per_node": 3\n' +
+      '      }\n' +
+      '    },\n' +
+      '    {\n' +
+      '      "agent": "mapper",\n' +
+      '      "task": {\n' +
+      '        "type": "build_phase1",\n' +
+      '        "instruction": "Buat nodes berikut:\\n' +
+      'PROB-01 (root problem, parent_id:null, sub_problems:[PROB-01.1,PROB-01.2,PROB-01.3])\\n' +
+      'PROB-01.1 (sub-problem 1, parent_id:PROB-01)\\n' +
+      'PROB-01.2 (sub-problem 2, parent_id:PROB-01)\\n' +
+      'PROB-01.3 (sub-problem 3, parent_id:PROB-01)\\n' +
+      'OC-ECO-01 (outcome ekonomi)\\n' +
+      'OC-SOC-01 (outcome sosial)\\n' +
+      'Gunakan evidence_ids dari evidence yang tersedia. Link nodes. Panggil checkpoint().",\n' +
+      '        "planned_nodes": {\n' +
+      '          "problem_ids": ["PROB-01","PROB-01.1","PROB-01.2","PROB-01.3"],\n' +
+      '          "outcome_ids": ["OC-ECO-01","OC-SOC-01"]\n' +
+      '        }\n' +
+      '      }\n' +
+      '    }\n' +
       '  ],\n' +
-      '  "reply_to_user": "pesan singkat ke user tentang apa yang akan dilakukan"\n' +
+      '  "reply_to_user": "pesan singkat bahasa Indonesia"\n' +
       '}\n\n' +
+      'ATURAN PLAN:\n' +
+      '1. SELALU tentukan node_ids eksplisit di evidence task — minimal 1 root + 3 sub-problems\n' +
+      '2. SELALU sertakan planned_nodes di mapper task dengan list ID lengkap\n' +
+      '3. Mapper instruction WAJIB menyebutkan setiap node yang harus dibuat dengan ID-nya\n' +
+      '4. Sub-problems: identifikasi 3-4 masalah spesifik dari konteks program\n' +
+      '5. Outcomes: minimal 2 (ekonomi + sosial)\n\n' +
       'INTENT MAPPING:\n' +
-      '- Input pertama (program baru) → build_phase1\n' +
-      '- Setelah checkpoint disetujui → build_phase2\n' +
-      '- User ganti label/deskripsi → revision_minor (mapper saja)\n' +
+      '- Input program baru → build_phase1\n' +
+      '- User ganti label/deskripsi → revision_minor (mapper saja, tanpa evidence)\n' +
       '- User ganti substansi node → revision_medium (evidence + mapper + qa)\n' +
       '- User hapus/tambah node kritis → revision_major (qa dulu + evidence + mapper + qa)\n' +
-      '- User minta cek konsistensi → qa_only\n' +
-      '- User bertanya/ngobrol → user_question (tidak ada steps)\n\n' +
-      'ATURAN EVIDENCE:\n' +
+      '- User minta cek → qa_only\n' +
+      '- User ngobrol/tanya → user_question (steps kosong [])\n\n' +
+      'ATURAN EVIDENCE (max token):\n' +
       '- problem_framing: max 3 ref/node\n' +
       '- proxy_basis: max 2 ref/proxy\n' +
-      '- ddat_justification: max 1 ref/faktor\n' +
-      '- revision: max 3 ref\n\n' +
+      '- ddat_justification: max 1 ref/faktor\n\n' +
       'STATE ONTOLOGI SAAT INI:\n' + ontSummary;
 
     // Tambahkan pesan ke history orchestrator
@@ -7388,9 +7443,39 @@
         // Jalankan Evidence Agent
         var evTask = Object.assign({}, step.task);
         var evResult = await runEvidenceAgent(evTask);
-        // Akumulasi packets untuk Mapper berikutnya
-        evidencePackets = evidencePackets.concat(evResult.packets || []);
-        agentLog('orchestrator', 'evidence-done', evResult.packets.length + ' packets');
+        var newPackets = evResult.packets || [];
+
+        // FIX 1: Simpan packets ke evidenceByNode + problem_context.references
+        // agar agentRenderCard bisa menampilkan title + URL dengan benar
+        newPackets.forEach(function(p) {
+          // Simpan ke evidenceByNode per node
+          if (p.node_id) {
+            agentState.evidenceByNode[p.node_id] = agentState.evidenceByNode[p.node_id] || [];
+            var already = agentState.evidenceByNode[p.node_id].find(function(e){ return e.id === p.ref_id; });
+            if (!already) {
+              agentState.evidenceByNode[p.node_id].push({
+                id: p.ref_id, title: p.title, url: p.url, year: p.year,
+                relevance_note: p.relevance, type: 'other', _source: 'evidence_agent', _for_node: p.node_id
+              });
+            }
+          }
+          // Simpan ke problem_context.references (global registry)
+          var ont = agentState.draftOntology;
+          if (ont && ont.problem_context) {
+            if (!ont.problem_context.references) ont.problem_context.references = [];
+            var alreadyGlobal = ont.problem_context.references.find(function(r){ return r.id === p.ref_id; });
+            if (!alreadyGlobal) {
+              ont.problem_context.references.push({
+                id: p.ref_id, title: p.title, url: p.url, year: p.year,
+                type: 'other', relevance_note: p.relevance
+              });
+            }
+          }
+        });
+
+        // Akumulasi untuk Mapper berikutnya
+        evidencePackets = evidencePackets.concat(newPackets);
+        agentLog('orchestrator', 'evidence-done', newPackets.length + ' packets → evidenceByNode updated');
 
       } else if (step.agent === 'mapper') {
         // Inject accumulated evidence ke mapper task
