@@ -6808,9 +6808,15 @@
           web_search_options: {},
           messages: [
             { role: 'system', content: 'Kamu adalah research assistant SROI program CSR Indonesia. '
-              + 'Berikan maksimal ' + maxTotal + ' referensi terpercaya (pemerintah, jurnal, laporan resmi). '
+              + 'Berikan maksimal ' + maxTotal + ' referensi. '
+              + 'PRIORITAS SUMBER (urut dari tertinggi):\n'
+              + '1. Jurnal akademik peer-reviewed (Google Scholar, DOAJ, Garuda, Sinta, Scopus)\n'
+              + '2. Laporan kajian/riset dari lembaga resmi (BPS, Kemenristekdikti, BRIN, LIPI, World Bank, ILO, UNDP)\n'
+              + '3. Regulasi/kebijakan pemerintah (peraturan.go.id, jdih.go.id)\n'
+              + '4. Laporan tahunan/kajian CSR dari perusahaan atau lembaga terpercaya\n'
+              + 'HINDARI: blog, berita umum, Wikipedia, sumber tanpa institusi jelas.\n'
               + 'Untuk setiap referensi, tandai node mana yang paling relevan dari daftar target nodes. '
-              + 'Format setiap baris: JUDUL | TAHUN | URL | RELEVANSI | NODE_ID_TARGET'
+              + 'Format setiap baris: JUDUL | TAHUN | URL | RELEVANSI_SINGKAT | NODE_ID_TARGET'
               + '\nPastikan URL lengkap dimulai dengan https://. Jangan tambahkan teks lain.' },
             { role: 'user', content: query + nodeList }
           ]
@@ -6901,7 +6907,14 @@
           max_tokens: 1500,
           web_search_options: {},
           messages: [
-            { role: 'system', content: 'Kamu adalah research assistant untuk analisis SROI program CSR Indonesia. Berikan 3-5 referensi terpercaya (pemerintah, jurnal, laporan resmi) yang relevan. Format setiap referensi pada baris terpisah: JUDUL | TAHUN | URL | RELEVANSI_SINGKAT. Jangan tambahkan teks lain selain daftar referensi.' },
+            { role: 'system', content: 'Kamu adalah research assistant untuk analisis SROI program CSR Indonesia. '
+              + 'Berikan 3-5 referensi dengan PRIORITAS:\n'
+              + '1. Jurnal akademik peer-reviewed (Google Scholar, DOAJ, Garuda, Sinta, Scopus)\n'
+              + '2. Laporan kajian dari lembaga resmi (BPS, BRIN, LIPI, Kementerian, World Bank, ILO, UNDP)\n'
+              + '3. Regulasi/kebijakan pemerintah resmi\n'
+              + 'HINDARI: blog, berita umum, Wikipedia, sumber tanpa institusi jelas.\n'
+              + 'Format setiap referensi pada baris terpisah: JUDUL | TAHUN | URL | RELEVANSI_SINGKAT\n'
+              + 'Pastikan URL lengkap dimulai https://. Jangan tambahkan teks lain.' },
             { role: 'user', content: prompt }
           ]
         })
