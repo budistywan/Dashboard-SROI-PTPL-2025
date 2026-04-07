@@ -6492,11 +6492,13 @@
       }
 
       case 'search_evidence': {
-        // Log intent — actual search dilakukan via API dengan web_search tool
-        // Result akan dikembalikan oleh API dan disimpan di evidenceByNode
+        // Actual search dilakukan async via agentSearchEvidence()
+        // Tool executor hanya log intent, search dijalankan background
         agentState.opLog.push({ id: opId, tool: 'search_evidence', query: args.query, purpose: args.purpose, target: args.target_node_id });
         agentState.evidenceByNode[args.target_node_id] = agentState.evidenceByNode[args.target_node_id] || [];
-        return { success: true, message: 'Search akan dilakukan via GPT web search' };
+        // Jalankan search async — tidak block tool loop
+        agentSearchEvidence(args.query, args.target_node_id, args.purpose);
+        return { success: true, message: 'Search dimulai untuk: ' + args.query };
       }
 
       case 'flag_for_verification': {
@@ -6584,7 +6586,95 @@
     }
   }
 
-  // ── AGENT CALL GPT (OpenAI tool use loop) ─────────────────────────────
+  // ── EVIDENCE SEARCH via gpt-4o-search-preview ────────────────────────
+  async function agentSearchEvidence(query, targetNodeId, purpose) {
+    var key = AGENT_INTERFACE.getGPTKey();
+    if (!key) return;
+
+    try {
+      var purposePrompt = {
+        'problem_framing':    'Cari data statistik, regulasi, dan laporan yang mendukung framing masalah sosial-ekonomi berikut untuk analisis SROI program CSR Indonesia:',
+        'proxy_basis':        'Cari referensi akademik, laporan pemerintah, atau studi yang bisa digunakan sebagai dasar proxy value untuk monetisasi manfaat program berikut:',
+        'ddat_justification': 'Cari bukti empiris untuk menentukan besaran faktor DDAT (Deadweight, Displacement, Attribution, Drop-off) yang wajar untuk program berikut:',
+        'other':              'Cari referensi relevan untuk:'
+      };
+      var prompt = (purposePrompt[purpose] || purposePrompt.other) + '\n\n' + query;
+
+      var res = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + key },
+        body: JSON.stringify({
+          model: 'gpt-4o-search-preview',
+          max_tokens: 1500,
+          web_search_options: {},
+          messages: [
+            { role: 'system', content: 'Kamu adalah research assistant untuk analisis SROI program CSR Indonesia. Berikan 3-5 referensi terpercaya (pemerintah, jurnal, laporan resmi) yang relevan. Format setiap referensi: JUDUL | TAHUN | URL | RELEVANSI_SINGKAT' },
+            { role: 'user', content: prompt }
+          ]
+        })
+      });
+      var data = await res.json();
+      if (data.error) { console.warn('Search error:', data.error.message); return; }
+
+      var content = data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content || '';
+      if (!content) return;
+
+      // Parse hasil dan simpan ke evidenceByNode + problem_context.references
+      var lines = content.split('\n').filter(function(l){ return l.includes('|'); });
+      var parsed = lines.map(function(line, idx) {
+        var parts = line.split('|').map(function(p){ return p.trim(); });
+        var refId = 'REF-AGT-' + targetNodeId.replace(/[^A-Z0-9]/gi,'-') + '-' + (idx+1);
+        return {
+          id: refId,
+          title: parts[0] || 'Referensi ' + (idx+1),
+          year: parts[1] || '',
+          url: parts[2] || '',
+          type: 'other',
+          relevance_note: parts[3] || '',
+          _source: 'agent_search'
+        };
+      }).filter(function(r){ return r.title && r.title.length > 3; });
+
+      if (!parsed.length) return;
+
+      // Simpan ke evidenceByNode
+      var nodeEvidence = agentState.evidenceByNode[targetNodeId] || [];
+      parsed.forEach(function(ref) {
+        if (!nodeEvidence.find(function(e){ return e.id === ref.id; })) {
+          nodeEvidence.push(ref);
+        }
+      });
+      agentState.evidenceByNode[targetNodeId] = nodeEvidence;
+
+      // Tambahkan ke problem_context.references di draftOntology
+      var ont = agentState.draftOntology;
+      if (ont && ont.problem_context) {
+        if (!ont.problem_context.references) ont.problem_context.references = [];
+        parsed.forEach(function(ref) {
+          if (!ont.problem_context.references.find(function(r){ return r.id === ref.id; })) {
+            ont.problem_context.references.push(ref);
+          }
+        });
+      }
+
+      // Re-render card jika sudah ada
+      var card = document.getElementById('anc-' + targetNodeId);
+      if (card) {
+        // Cari node di draftOntology dan re-render
+        var allCols = ['problem_nodes','outcome_nodes','indicator_nodes','monetisation_pre_fix_nodes','impact_adjustment_nodes'];
+        allCols.forEach(function(col) {
+          var node = (ont && ont[col] || []).find(function(n){ return n && n.id === targetNodeId; });
+          if (node) {
+            node._agent_evidence = parsed.map(function(r){ return r.id; });
+            agentRenderCard(targetNodeId, col, node, node._agent_reasoning, node._agent_evidence);
+          }
+        });
+      }
+
+    } catch(err) {
+      console.warn('agentSearchEvidence error:', err.message);
+    }
+  }
   async function agentCallGPT(userMessage, useWebSearch) {
     var key = AGENT_INTERFACE.getGPTKey();
     if (!key) throw new Error('OpenAI API key belum diisi. Masukkan key di panel AI Engine di atas.');
@@ -6641,11 +6731,9 @@
     // Tambahkan pesan user ke history
     agentState.agentHistory.push({ role: 'user', content: userMessage });
 
-    // Tools yang dipakai — tambahkan web_search jika diperlukan
-    var tools = AGENT_TOOL_DEFS.slice(); // copy
-    if (useWebSearch) {
-      tools.push({ type: 'web_search_preview' });
-    }
+    // Tools yang dipakai — web_search TIDAK masuk tools[] OpenAI standard
+    // Search dilakukan via model gpt-4o-search-preview di agentSearchEvidence()
+    var tools = AGENT_TOOL_DEFS.slice();
 
     var maxIterations = 30; // safety limit
     var iteration = 0;
@@ -7351,7 +7439,7 @@
         agentState.inputContext.program_title = text.split(/[\n\-—]/)[0].trim();
         agentState.inputContext.activities = text;
       }
-      await agentCallGPT(text, true); // useWebSearch = true untuk fase awal
+      await agentCallGPT(text); // search evidence dilakukan terpisah via agentSearchEvidence()
     } catch(err) {
       agentAppendBubble('agent', '⚠ Error: ' + err.message);
       agentUpdateModeBar('idle', 'Error', err.message);
@@ -7366,7 +7454,7 @@
     if (sendBtn) { sendBtn.disabled = true; sendBtn.textContent = '...'; }
     agentUpdateModeBar('building', 'Melanjutkan Build', 'Agent meneruskan...');
     try {
-      await agentCallGPT('Lanjutkan build ontologi ke layer berikutnya.', true);
+      await agentCallGPT('Lanjutkan build ontologi ke layer berikutnya.');
     } catch(err) {
       agentAppendBubble('agent', '⚠ Error: ' + err.message);
     }
@@ -7380,7 +7468,7 @@
     agentUpdateModeBar('building', 'Memproses', '');
     agentAppendBubble('user', msg);
     try {
-      await agentCallGPT(msg, false);
+      await agentCallGPT(msg);
     } catch(err) {
       agentAppendBubble('agent', '⚠ Error: ' + err.message);
     }
