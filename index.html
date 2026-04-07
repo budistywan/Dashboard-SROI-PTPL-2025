@@ -6307,11 +6307,13 @@
           type: 'object',
           properties: {
             collection: { type: 'string', description: 'Nama collection: problem_nodes | activity_nodes | stakeholder_nodes | beneficiary_nodes | output_delivery_nodes | baseline_nodes | outcome_nodes | indicator_nodes | monetisation_pre_fix_nodes | impact_adjustment_nodes | final_value_nodes | final_value_aggregates | investment_nodes | investment_aggregates' },
-            data: { type: 'object', description: 'Isi node sesuai schema ontologi. Sertakan field _agent_status: "draft"' },
+            node_id: { type: 'string', description: 'ID unik node. Format: PROB-01, PROB-01.1, ACT_2023, OC-ECO-01, IND-ECO-01, MON-JSP, ADJ_JSP, FV_2023_MON_JSP, dll. WAJIB diisi.' },
+            label: { type: 'string', description: 'Label/judul node dalam bahasa Indonesia.' },
+            extra_fields: { type: 'object', description: 'Field tambahan sesuai collection. Contoh: {dimension:"economic", problem_type:"structural_gap", description:"...", vulnerability_anchor:{...}} untuk problem_nodes. {dimension:"economic", description:"..."} untuk outcome_nodes.' },
             reasoning: { type: 'string', description: 'Penjelasan mengapa node ini dibuat dengan isi seperti ini' },
             evidence_ids: { type: 'array', items: { type: 'string' }, description: 'Array ref_id dari evidence yang mendukung node ini' }
           },
-          required: ['collection', 'data', 'reasoning']
+          required: ['collection', 'node_id', 'label', 'reasoning']
         }
       }
     },
@@ -6457,22 +6459,30 @@
 
       case 'create_node': {
         var col = args.collection;
-        var data = args.data || {};
-        if (!data._agent_status) data._agent_status = 'draft';
+        // Bangun data node dari parameter terpisah (bukan embedded object)
+        var data = Object.assign({}, args.extra_fields || {});
+        data.id     = args.node_id;
+        data.label  = data.label || args.label || '';
+        // Fallback: kalau GPT masih kirim data object lama
+        if (!data.id && args.data && args.data.id) {
+          data = Object.assign({}, args.data);
+        }
+        if (!data.id) {
+          console.error('[AGENT] create_node dipanggil tanpa node_id!', args);
+          return { error: 'node_id wajib diisi' };
+        }
+        data._agent_status   = 'draft';
         data._agent_reasoning = args.reasoning || '';
         data._agent_evidence  = args.evidence_ids || [];
         if (!Array.isArray(ont[col])) ont[col] = [];
-        // Cek duplikat ID
-        var existing = data.id && ont[col].find(function(n){ return n && n.id === data.id; });
-        if (existing) {
-          console.warn('[AGENT] Duplikat ID:', data.id, 'di', col, '— skip');
+        // Cek duplikat
+        var existingNode = ont[col].find(function(n){ return n && n.id === data.id; });
+        if (existingNode) {
+          console.warn('[AGENT] Duplikat ID:', data.id, '— skip');
           return { error: 'Node ' + data.id + ' sudah ada di ' + col };
         }
-        console.log('[AGENT] create_node:', data.id, 'di', col, '| label:', data.label||data.name||data.aspect||'?');
+        console.log('[AGENT] create_node:', data.id, 'di', col, '| label:', data.label);
         ont[col].push(data);
-        if (data.id && args.evidence_ids && args.evidence_ids.length) {
-          agentState.evidenceByNode[data.id] = agentState.evidenceByNode[data.id] || [];
-        }
         agentState.opLog.push({ id: opId, tool: 'create_node', collection: col, node_id: data.id, reasoning: args.reasoning });
         agentRenderCard(data.id, col, data, args.reasoning, args.evidence_ids || []);
         return { success: true, node_id: data.id, collection: col };
@@ -6725,7 +6735,18 @@
       '- monetisation: MON-XXX\n' +
       '- adjustment: ADJ_XXX\n' +
       '- final_value: FV_YYYY_MON_XXX\n\n' +
-      'Selalu set _agent_status: "draft" pada setiap node yang dibuat.\n' +
+      'CARA MEMANGGIL create_node (PENTING):\n' +
+      'Parameter WAJIB terpisah — JANGAN embed id di dalam extra_fields:\n' +
+      '  collection: "problem_nodes"\n' +
+      '  node_id: "PROB-01"          ← ID node, WAJIB\n' +
+      '  label: "Judul node"         ← label singkat, WAJIB\n' +
+      '  extra_fields: {             ← field tambahan sesuai collection\n' +
+      '    dimension: "economic",\n' +
+      '    problem_type: "structural_gap",\n' +
+      '    description: "...",\n' +
+      '    vulnerability_anchor: {...}\n' +
+      '  }\n' +
+      '  reasoning: "Mengapa node ini dibuat"\n\n' +
       'Gunakan bahasa Indonesia untuk label dan deskripsi.\n' +
       'Respond dalam bahasa Indonesia.';
 
