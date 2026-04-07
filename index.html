@@ -7037,21 +7037,30 @@
     if (emptyEl) emptyEl.style.display = 'none';
 
     if (existingCard) {
-      existingCard.outerHTML = html;
+      // Update existing card in place
+      var tempDiv = document.createElement('div');
+      tempDiv.innerHTML = html;
+      var newCard = tempDiv.querySelector('.agent-node-card') || tempDiv.firstElementChild;
+      if (newCard) existingCard.parentNode.replaceChild(newCard, existingCard);
     } else {
-      // Cari atau buat layer group
+      // Cari atau buat layer group untuk collection ini
       var layerGroupId = 'agent-layer-' + col;
       var layerGroup = document.getElementById(layerGroupId);
       if (!layerGroup) {
         layerGroup = document.createElement('div');
         layerGroup.id = layerGroupId;
         layerGroup.className = 'agent-layer-group';
-        layerGroup.innerHTML = '<div class="agent-layer-label">'+agentColLabel(col)+'</div>';
+        var labelDiv = document.createElement('div');
+        labelDiv.className = 'agent-layer-label';
+        labelDiv.textContent = agentColLabel(col);
+        layerGroup.appendChild(labelDiv);
         scroll.appendChild(layerGroup);
       }
-      var cardDiv = document.createElement('div');
-      cardDiv.innerHTML = html;
-      layerGroup.appendChild(cardDiv.firstChild);
+      // Parse html dan ambil elemen card (firstElementChild, bukan firstChild)
+      var tempDiv2 = document.createElement('div');
+      tempDiv2.innerHTML = html;
+      var cardEl = tempDiv2.querySelector('.agent-node-card') || tempDiv2.firstElementChild;
+      if (cardEl) layerGroup.appendChild(cardEl);
     }
 
     agentUpdateProgressBar();
@@ -7218,26 +7227,31 @@
   // ── FILTER CARDS ──────────────────────────────────────────────────────
   window.agentFilterCards = function(filter) {
     agentState.activeFilter = filter;
+    // Update filter button states
     ['All','Draft','Flagged','Approved'].forEach(function(f) {
       var btn = document.getElementById('agentFilter' + f);
       if (btn) btn.classList.toggle('active', filter === f.toLowerCase() || (f==='All' && filter==='all'));
     });
-    var cards = document.querySelectorAll('.agent-node-card');
+    // Show/hide cards
+    var cards = document.querySelectorAll('#agentCardsScroll .agent-node-card');
     cards.forEach(function(c) {
       var show = filter === 'all' || c.dataset.status === filter;
       c.style.display = show ? '' : 'none';
     });
-    // Show/hide layer group headers
-    document.querySelectorAll('.agent-layer-group').forEach(function(g) {
-      var visibleCards = g.querySelectorAll('.agent-node-card:not([style*="display: none"])');
-      g.style.display = visibleCards.length ? '' : 'none';
+    // Show/hide layer group headers — pakai getComputedStyle
+    document.querySelectorAll('#agentCardsScroll .agent-layer-group').forEach(function(g) {
+      var hasVisible = false;
+      g.querySelectorAll('.agent-node-card').forEach(function(c) {
+        if (c.style.display !== 'none') hasVisible = true;
+      });
+      g.style.display = hasVisible ? '' : 'none';
     });
   };
 
   // ── PROGRESS BAR ──────────────────────────────────────────────────────
   function agentUpdateProgressBar() {
-    var all = document.querySelectorAll('.agent-node-card');
-    var approved = document.querySelectorAll('.agent-node-card.approved');
+    var all      = document.querySelectorAll('#agentCardsScroll .agent-node-card');
+    var approved = document.querySelectorAll('#agentCardsScroll .agent-node-card.approved');
     var total = all.length, done = approved.length;
     var bar = document.getElementById('agentProgressBar');
     var label = document.getElementById('agentProgressLabel');
