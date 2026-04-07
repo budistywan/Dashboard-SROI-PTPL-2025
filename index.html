@@ -6337,7 +6337,7 @@
       type: 'function',
       function: {
         name: 'search_evidence',
-        description: 'WAJIB dipanggil sebelum finalize problem_node, proxy MON node, atau DDAT factor rates. Cari referensi eksternal untuk mendukung node. OPSIONAL untuk node lain.',
+        description: 'Cari referensi untuk mendukung node. PENTING: tool ini berjalan di background — hasilnya TIDAK dikembalikan ke kamu. Setelah memanggil tool ini, LANGSUNG lanjut ke create_node atau tool berikutnya, JANGAN menunggu. Wajib dipanggil sebelum problem_node dan proxy MON node, tapi jangan tunggu hasilnya.',
         parameters: {
           type: 'object',
           properties: {
@@ -6509,7 +6509,7 @@
         agentState.evidenceByNode[args.target_node_id] = agentState.evidenceByNode[args.target_node_id] || [];
         // Jalankan search async — tidak block tool loop
         agentSearchEvidence(args.query, args.target_node_id, args.purpose);
-        return { success: true, message: 'Search dimulai untuk: ' + args.query };
+        return { success: true, message: 'Search dimulai di background untuk node ' + args.target_node_id + '. LANJUTKAN ke create_node sekarang — jangan tunggu hasil search.' };
       }
 
       case 'flag_for_verification': {
@@ -6707,56 +6707,39 @@
 
     var systemPrompt = 'Kamu adalah Ontology Builder Agent untuk analisis SROI/TJSL program CSR Indonesia.\n\n' +
       'PERANMU:\n' +
-      'Kamu membangun ontologi lengkap dari input minimal (judul + aktivitas program).\n' +
-      'Kamu bekerja melalui tool calls — setiap node dibuat via create_node, setiap relasi via link_nodes.\n' +
-      'Kamu SELALU search evidence (search_evidence) sebelum membuat problem_node atau proxy MON node atau DDAT factors.\n' +
-      'Kamu SELALU flag_for_verification setelah propose proxy_value_idr dan DDAT factor rates.\n' +
-      'Kamu TIDAK menunggu verifikasi node individual — terus bangun sampai ontologi lengkap kecuali blocking=true.\n\n' +
-      'URUTAN BUILD:\n' +
-      '1. Parse input → identifikasi program_title + activities\n' +
-      '2. search_evidence untuk problem framing\n' +
-      '3. Buat problem_nodes (PROB-01 + sub-problems)\n' +
-      '4. Buat outcome_nodes awal\n' +
-      '5. Panggil checkpoint() — tunggu konfirmasi human\n' +
-      '6. Setelah confirmed: buat activity, output_delivery, stakeholder, beneficiary, baseline\n' +
-      '7. Buat indicator_nodes\n' +
-      '8. search_evidence untuk setiap proxy MON\n' +
-      '9. Buat monetisation_pre_fix_nodes + flag_for_verification\n' +
-      '10. search_evidence untuk DDAT\n' +
-      '11. Buat impact_adjustment_nodes + flag_for_verification\n' +
-      '12. Buat final_value_nodes\n' +
-      '13. compute_fva\n' +
-      '14. run_qa(scope="full")\n\n' +
-      'SCHEMA ONTOLOGI:\n' + schema + ontCtx + '\n\n' +
+      'Membangun ontologi lengkap dari input minimal (judul + aktivitas program) melalui tool calls.\n' +
+      'Setiap node dibuat via create_node. Setiap relasi via link_nodes.\n\n' +
+      'PRINSIP KRITIS — JANGAN MENUNGGU HASIL SEARCH:\n' +
+      'search_evidence berjalan di BACKGROUND — hasilnya tidak dikembalikan ke kamu.\n' +
+      'Setelah memanggil search_evidence, LANGSUNG lanjut ke create_node berikutnya.\n' +
+      'JANGAN menunggu hasil search sebelum membuat node.\n' +
+      'Pola yang benar:\n' +
+      '  search_evidence(query="...", target_node_id="PROB-01.1") → create_node(PROB-01.1) → search_evidence(...PROB-01.2) → create_node(PROB-01.2) → dst\n\n' +
+      'URUTAN BUILD (Fase 1 — sampai checkpoint):\n' +
+      '1. Parse input → identifikasi judul + aktivitas\n' +
+      '2. Untuk setiap problem node yang akan dibuat:\n' +
+      '   a. search_evidence(query spesifik, target_node_id = ID node tsb)\n' +
+      '   b. LANGSUNG create_node untuk node tsb\n' +
+      '3. Buat outcome_nodes (tanpa search, kecuali diperintah)\n' +
+      '4. link_nodes untuk relasi problem→sub_problem, output_delivery→outcome\n' +
+      '5. checkpoint() — ringkas apa yang dibuat\n\n' +
       'ATURAN ID:\n' +
-      '- problem_nodes: PROB-01, PROB-01.1, PROB-01.2, ...\n' +
-      '- activity_nodes: ACT_YYYY\n' +
-      '- outcome_nodes: OC-ECO-01, OC-SOC-01, OC-WB-01\n' +
-      '- indicator_nodes: IND-ECO-01, IND-SOC-01, IND-WB-01\n' +
-      '- monetisation: MON-XXX\n' +
-      '- adjustment: ADJ_XXX\n' +
-      '- final_value: FV_YYYY_MON_XXX\n\n' +
-      'ATURAN SEARCH EVIDENCE (KRITIS):\n' +
-      '- Panggil search_evidence SEKALI PER NODE — dengan target_node_id = ID node yang sedang dibangun\n' +
-      '- JANGAN gunakan target_node_id yang sama untuk banyak node berbeda\n' +
-      '- Contoh BENAR:\n' +
-      '    search_evidence(query="masalah akses BBM nelayan", target_node_id="PROB-01.1")\n' +
-      '    search_evidence(query="keterampilan mekanik nelayan", target_node_id="PROB-01.2")\n' +
-      '- Contoh SALAH:\n' +
-      '    search_evidence(query="...", target_node_id="PROB-01") ← untuk semua sub-problem\n\n' +
-      'Parameter WAJIB terpisah — JANGAN embed id di dalam extra_fields:\n' +
+      '  problem_nodes: PROB-01, PROB-01.1, PROB-01.2\n' +
+      '  outcome_nodes: OC-ECO-01, OC-SOC-01, OC-WB-01\n' +
+      '  activity_nodes: ACT_YYYY\n' +
+      '  indicator_nodes: IND-ECO-01\n' +
+      '  monetisation: MON-XXX | adjustment: ADJ_XXX | final_value: FV_YYYY_MON_XXX\n\n' +
+      'CARA MEMANGGIL create_node:\n' +
       '  collection: "problem_nodes"\n' +
-      '  node_id: "PROB-01"          ← ID node, WAJIB\n' +
-      '  label: "Judul node"         ← label singkat, WAJIB\n' +
-      '  extra_fields: {             ← field tambahan sesuai collection\n' +
-      '    dimension: "economic",\n' +
-      '    problem_type: "structural_gap",\n' +
-      '    description: "...",\n' +
-      '    vulnerability_anchor: {...}\n' +
-      '  }\n' +
-      '  reasoning: "Mengapa node ini dibuat"\n\n' +
-      'Gunakan bahasa Indonesia untuk label dan deskripsi.\n' +
-      'Respond dalam bahasa Indonesia.';
+      '  node_id: "PROB-01.1"     ← WAJIB, string eksplisit\n' +
+      '  label: "Judul node"      ← WAJIB\n' +
+      '  extra_fields: { dimension:"economic", description:"...", problem_type:"capability_gap" }\n' +
+      '  reasoning: "Alasan"\n\n' +
+      'ATURAN search_evidence:\n' +
+      '  target_node_id = ID node yang spesifik (PROB-01.1, bukan PROB-01 untuk semua)\n' +
+      '  Setelah search → LANGSUNG buat node, jangan tunggu\n\n' +
+      'SCHEMA:\n' + schema + ontCtx + '\n\n' +
+      'Gunakan bahasa Indonesia. Respond dalam bahasa Indonesia.';
 
     // Tambahkan pesan user ke history
     agentState.agentHistory.push({ role: 'user', content: userMessage });
