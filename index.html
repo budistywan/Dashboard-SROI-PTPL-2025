@@ -1507,6 +1507,68 @@
 
       <!-- ── Tab NLP: Buat dari Deskripsi ── -->
       <div class="tab-panel" id="tab-nlp">
+
+        <!-- ── AGENT WORKSPACE — sibling dari nlp-left & nlp-right ── -->
+        <div class="agent-workspace" id="agentWorkspace" style="display:none;">
+          <!-- Mode bar -->
+          <div class="agent-mode-bar" id="agentModeBar">
+            <div class="agent-mode-dot idle" id="agentModeDot"></div>
+            <span class="agent-mode-label" id="agentModeLabel">Agen Siap</span>
+            <span class="agent-mode-sub" id="agentModeSub">Ketik judul dan aktivitas program untuk memulai</span>
+            <div class="agent-mode-actions">
+              <button class="agent-btn" onclick="agentRunQA()" id="agentQABtn" disabled>🔍 QA</button>
+              <button class="agent-btn success" onclick="agentCommit()" id="agentCommitBtn" disabled>💾 Commit</button>
+              <button class="agent-btn" onclick="agentDeactivate()">✕ Tutup Agen</button>
+            </div>
+          </div>
+          <!-- Split: chat + cards -->
+          <div class="agent-split">
+            <!-- Left: chat -->
+            <div class="agent-chat-col">
+              <div class="agent-chat-head">💬 Percakapan Agen</div>
+              <div class="agent-chat-scroll" id="agentChatScroll">
+                <div class="agent-bubble agent" id="agentWelcomeBubble">
+                  <div class="agent-bubble-label">Agen Ontologi</div>
+                  Halo! Saya siap membangun ontologi SROI dari nol.<br><br>
+                  Cukup ketik <strong>judul program</strong> dan <strong>aktivitas utamanya</strong> — saya akan mulai menyusun draft problem tree dan outcome.
+                </div>
+              </div>
+              <div class="agent-chat-composer">
+                <textarea id="agentComposer" placeholder="Judul program dan aktivitasnya…" rows="2" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();agentSend();}"></textarea>
+                <button class="agent-send-btn" id="agentSendBtn" onclick="agentSend()">Kirim</button>
+              </div>
+            </div>
+            <!-- Right: card workspace -->
+            <div class="agent-cards-col">
+              <div class="agent-cards-head">
+                <span class="agent-cards-title">🗂 Node Cards</span>
+                <div style="display:flex;gap:4px;margin-left:8px;">
+                  <button class="agent-filter-btn active" id="agentFilterAll" onclick="agentFilterCards('all')">Semua</button>
+                  <button class="agent-filter-btn" id="agentFilterDraft" onclick="agentFilterCards('draft')">Draft</button>
+                  <button class="agent-filter-btn" id="agentFilterFlagged" onclick="agentFilterCards('flagged')">⚠ Flagged</button>
+                  <button class="agent-filter-btn" id="agentFilterApproved" onclick="agentFilterCards('approved')">✓ Approved</button>
+                </div>
+                <div class="agent-progress-bar" id="agentProgressBar" style="display:none;">
+                  <span id="agentProgressLabel">0 / 0</span>
+                  <div class="agent-progress-track">
+                    <div class="agent-progress-fill" id="agentProgressFill" style="width:0%"></div>
+                  </div>
+                </div>
+              </div>
+              <div class="agent-cards-scroll" id="agentCardsScroll">
+                <div style="color:var(--muted);font-size:13px;text-align:center;padding:40px 20px;line-height:1.7;" id="agentCardsEmpty">
+                  Node-node ontologi akan muncul di sini<br>saat agen mulai membangun.
+                </div>
+              </div>
+              <div class="agent-commit-bar" id="agentCommitBar" style="display:none;">
+                <div class="agent-commit-stats" id="agentCommitStats">–</div>
+                <div class="agent-sroi-preview" id="agentSroiPreview" style="display:none;">–</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <!-- END AGENT WORKSPACE -->
+
         <!-- Left: Chat -->
         <div class="nlp-left">
           <div class="nlp-left-head">
@@ -1520,67 +1582,6 @@
               <button class="nlp-ptag" id="agentModeBtn" style="background:#1e3a5f;color:white;border-color:#1e3a5f;font-weight:800;margin-left:4px;" onclick="agentActivate()">🤖 Mode Agen</button>
             </div>
           </div>
-
-          <!-- ── AGENT WORKSPACE (replaces NLP split when active) ── -->
-          <div class="agent-workspace" id="agentWorkspace">
-            <!-- Mode bar -->
-            <div class="agent-mode-bar" id="agentModeBar">
-              <div class="agent-mode-dot idle" id="agentModeDot"></div>
-              <span class="agent-mode-label" id="agentModeLabel">Agen Siap</span>
-              <span class="agent-mode-sub" id="agentModeSub">Ketik judul dan aktivitas program untuk memulai</span>
-              <div class="agent-mode-actions">
-                <button class="agent-btn" onclick="agentRunQA()" id="agentQABtn" disabled>🔍 QA</button>
-                <button class="agent-btn success" onclick="agentCommit()" id="agentCommitBtn" disabled>💾 Commit</button>
-                <button class="agent-btn" onclick="agentDeactivate()">✕ Tutup Agen</button>
-              </div>
-            </div>
-            <!-- Split: chat + cards -->
-            <div class="agent-split">
-              <!-- Left: chat -->
-              <div class="agent-chat-col">
-                <div class="agent-chat-head">💬 Percakapan Agen</div>
-                <div class="agent-chat-scroll" id="agentChatScroll">
-                  <div class="agent-bubble agent" id="agentWelcomeBubble">
-                    <div class="agent-bubble-label">Agen Ontologi</div>
-                    Halo! Saya siap membangun ontologi SROI dari nol.<br><br>
-                    Cukup ketik <strong>judul program</strong> dan <strong>aktivitas utamanya</strong> — saya akan mulai menyusun draft problem tree dan outcome.
-                  </div>
-                </div>
-                <div class="agent-chat-composer">
-                  <textarea id="agentComposer" placeholder="Judul program dan aktivitasnya…" rows="2" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();agentSend();}"></textarea>
-                  <button class="agent-send-btn" id="agentSendBtn" onclick="agentSend()">Kirim</button>
-                </div>
-              </div>
-              <!-- Right: card workspace -->
-              <div class="agent-cards-col">
-                <div class="agent-cards-head">
-                  <span class="agent-cards-title">🗂 Node Cards</span>
-                  <div style="display:flex;gap:4px;margin-left:8px;">
-                    <button class="agent-filter-btn active" id="agentFilterAll" onclick="agentFilterCards('all')">Semua</button>
-                    <button class="agent-filter-btn" id="agentFilterDraft" onclick="agentFilterCards('draft')">Draft</button>
-                    <button class="agent-filter-btn" id="agentFilterFlagged" onclick="agentFilterCards('flagged')">⚠ Flagged</button>
-                    <button class="agent-filter-btn" id="agentFilterApproved" onclick="agentFilterCards('approved')">✓ Approved</button>
-                  </div>
-                  <div class="agent-progress-bar" id="agentProgressBar" style="display:none;">
-                    <span id="agentProgressLabel">0 / 0</span>
-                    <div class="agent-progress-track">
-                      <div class="agent-progress-fill" id="agentProgressFill" style="width:0%"></div>
-                    </div>
-                  </div>
-                </div>
-                <div class="agent-cards-scroll" id="agentCardsScroll">
-                  <div style="color:var(--muted);font-size:13px;text-align:center;padding:40px 20px;line-height:1.7;" id="agentCardsEmpty">
-                    Node-node ontologi akan muncul di sini<br>saat agen mulai membangun.
-                  </div>
-                </div>
-                <div class="agent-commit-bar" id="agentCommitBar" style="display:none;">
-                  <div class="agent-commit-stats" id="agentCommitStats">–</div>
-                  <div class="agent-sroi-preview" id="agentSroiPreview" style="display:none;">–</div>
-                </div>
-              </div>
-            </div>
-          </div>
-          <!-- END AGENT WORKSPACE -->
           <div class="nlp-apikey-bar" id="nlpApiKeyBar">
             <div class="nlp-apikey-header" onclick="nlpToggleApiBar()">
               <span id="nlpApiStatusDot" class="nlp-status-dot"></span>
@@ -7269,20 +7270,33 @@
   window.agentActivate = function() {
     agentState.active = true;
     agentState.draftOntology = AGENT_INTERFACE.newDraft();
-    // Sembunyikan NLP default, tampilkan agent workspace
-    var nlpLeft = document.querySelector('.nlp-left');
-    var nlpRight = document.querySelector('.nlp-right');
-    var workspace = document.getElementById('agentWorkspace');
-    if (nlpLeft) nlpLeft.style.display = 'none';
+
+    // agentWorkspace adalah sibling dari nlp-left & nlp-right di dalam #tab-nlp (display:grid)
+    // Sembunyikan kedua kolom NLP, tampilkan workspace mengisi full grid
+    var nlpLeft  = document.querySelector('#tab-nlp > .nlp-left');
+    var nlpRight = document.querySelector('#tab-nlp > .nlp-right');
+    if (nlpLeft)  nlpLeft.style.display  = 'none';
     if (nlpRight) nlpRight.style.display = 'none';
-    if (workspace) workspace.classList.add('active');
-    // Sembunyikan default modal footer
+
+    var workspace = document.getElementById('agentWorkspace');
+    if (workspace) {
+      workspace.style.display      = 'flex';
+      workspace.style.flexDirection = 'column';
+      workspace.style.gridColumn   = '1 / -1';  // isi full width grid
+      workspace.style.height       = '100%';
+      workspace.style.overflow     = 'hidden';
+      workspace.style.minHeight    = '0';
+    }
+
+    // Footer
     var defFoot = document.getElementById('defaultModalFoot');
     if (defFoot) defFoot.style.display = 'none';
     var nlpFoot = document.getElementById('nlpModalFoot');
     if (nlpFoot) nlpFoot.style.display = 'none';
-    agentUpdateModeBar('idle', 'Agen Siap', 'Ketik judul dan aktivitas program');
-    document.getElementById('agentComposer') && document.getElementById('agentComposer').focus();
+
+    agentUpdateModeBar('idle', 'Agen Siap', 'Ketik judul dan aktivitas program untuk memulai');
+    var composer = document.getElementById('agentComposer');
+    if (composer) composer.focus();
   };
 
   window.agentDeactivate = function() {
@@ -7297,12 +7311,16 @@
     agentState.pendingVerifications = [];
     agentState.evidenceByNode = {};
     agentState.buildProgress = { layers_done: [], current_layer: null, blocking_on: null };
-    var nlpLeft = document.querySelector('.nlp-left');
-    var nlpRight = document.querySelector('.nlp-right');
-    var workspace = document.getElementById('agentWorkspace');
-    if (nlpLeft) nlpLeft.style.display = '';
+
+    // Restore nlp-left & nlp-right
+    var nlpLeft  = document.querySelector('#tab-nlp > .nlp-left');
+    var nlpRight = document.querySelector('#tab-nlp > .nlp-right');
+    if (nlpLeft)  nlpLeft.style.display  = '';
     if (nlpRight) nlpRight.style.display = '';
-    if (workspace) workspace.classList.remove('active');
+
+    var workspace = document.getElementById('agentWorkspace');
+    if (workspace) workspace.style.display = 'none';
+
     // Reset cards
     var scroll = document.getElementById('agentCardsScroll');
     if (scroll) {
@@ -7310,6 +7328,7 @@
     }
     var commitBar = document.getElementById('agentCommitBar');
     if (commitBar) commitBar.style.display = 'none';
+
     agentUpdateModeBar('idle', 'Agen Siap', '');
     var defFoot = document.getElementById('defaultModalFoot');
     if (defFoot) defFoot.style.display = '';
