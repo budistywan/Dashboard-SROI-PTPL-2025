@@ -6454,6 +6454,22 @@
           required: ['summary', 'problems_built', 'outcomes_built']
         }
       }
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'delete_node',
+        description: 'Hapus sebuah node dari ontologi draft. Otomatis menghapus relasi terkait. Gunakan ketika user meminta hapus node tertentu via chat.',
+        parameters: {
+          type: 'object',
+          properties: {
+            node_id:    { type: 'string', description: 'ID node yang akan dihapus.' },
+            collection: { type: 'string', description: 'Collection tempat node berada.' },
+            reasoning:  { type: 'string', description: 'Alasan penghapusan.' }
+          },
+          required: ['node_id', 'collection', 'reasoning']
+        }
+      }
     }
   ];
 
@@ -6707,8 +6723,66 @@
         return { success: true, awaiting_human: true };
       }
 
-      default:
-        return { error: 'Tool tidak dikenal: ' + toolName };
+      case 'delete_node': {
+        var delId  = args.node_id;
+        var delCol = args.collection;
+        if (!ont[delCol]) return { error: 'Collection tidak ditemukan: ' + delCol };
+
+        // Cek node ada
+        var delNode = (ont[delCol]||[]).find(function(n){ return n && n.id === delId; });
+        if (!delNode) return { error: 'Node ' + delId + ' tidak ditemukan di ' + delCol };
+
+        // Assess impact dulu
+        var impact = agentAssessImpact(delId, 'delete', {});
+
+        // Hapus dari collection
+        ont[delCol] = ont[delCol].filter(function(n){ return !n || n.id !== delId; });
+
+        // Hapus dari relation_index
+        var ri = ont.relation_index || {};
+        Object.keys(ri).forEach(function(k) {
+          if (ri[k] && ri[k][delId]) delete ri[k][delId];
+          Object.keys(ri[k]||{}).forEach(function(fid) {
+            if (Array.isArray(ri[k][fid])) {
+              ri[k][fid] = ri[k][fid].filter(function(tid){ return tid !== delId; });
+            }
+          });
+        });
+
+        // Hapus card dari DOM dengan animasi
+        var delCard = document.getElementById('anc-' + delId);
+        if (delCard) {
+          delCard.style.transition = 'opacity 0.3s, transform 0.3s';
+          delCard.style.opacity = '0';
+          delCard.style.transform = 'translateX(-10px)';
+          setTimeout(function(){ if (delCard.parentNode) delCard.remove(); agentUpdateProgressBar(); }, 300);
+        }
+
+        // Kalau MON node, hapus juga pasangannya
+        if (delNode._mon_paired_with) {
+          var pairId  = delNode._mon_paired_with;
+          var pairCol = delCol;
+          ont[pairCol] = (ont[pairCol]||[]).filter(function(n){ return !n || n.id !== pairId; });
+          var pairCard = document.getElementById('anc-' + pairId);
+          if (pairCard) {
+            pairCard.style.transition = 'opacity 0.3s';
+            pairCard.style.opacity = '0';
+            setTimeout(function(){ if (pairCard.parentNode) pairCard.remove(); }, 300);
+          }
+        }
+
+        agentState.opLog.push({ id: opId, tool: 'delete_node', node_id: delId, reasoning: args.reasoning });
+        agentUpdateCommitBar();
+
+        // Lapor impact ke chat
+        var impactMsg = 'Node ' + delId + ' dihapus.';
+        if (impact.downstream_ids.length) {
+          impactMsg += '\n⚠ ' + impact.downstream_ids.length + ' node downstream terpengaruh: ' + impact.downstream_ids.slice(0,5).join(', ');
+        }
+        agentAppendBubble('agent', impactMsg);
+
+        return { success: true, node_id: delId, downstream_affected: impact.downstream_ids };
+      }
     }
   }
 
@@ -6934,7 +7008,7 @@
 
     var systemPrompt = 'Kamu adalah Ontology Builder Agent untuk analisis SROI/TJSL program CSR Indonesia.\n\n' +
       'ALUR BUILD FASE 1 (sampai checkpoint):\n' +
-      '1. search_batch_problems(program_context, problem_ids) — 1 call, hasilnya kamu terima\n' +
+      '1. search_batch_problems(program_context, problem_ids) — 1 call\n' +
       '2. create_node setiap problem node dengan evidence_ids dari hasil search\n' +
       '3. create_node outcome_nodes — TANPA search\n' +
       '4. link_nodes relasi\n' +
@@ -6942,32 +7016,49 @@
       'ALUR BUILD FASE 2 (setelah user klik Lanjutkan):\n' +
       '6. create_node activity, output_delivery, stakeholder, beneficiary, baseline — TANPA search\n' +
       '7. create_node indicator_nodes — TANPA search\n' +
-      '8. Untuk setiap aspek monetisasi, buat DUA node sekaligus:\n' +
-      '   a. MON-[ASPEK]-INT (mon_source_type:"internal_report", mon_paired_with:"MON-[ASPEK]-PRX")\n' +
-      '      Label: "[Aspek] — Data Laporan Internal" — placeholder, angka diisi user\n' +
-      '   b. MON-[ASPEK]-PRX (mon_source_type:"proxy", mon_paired_with:"MON-[ASPEK]-INT")\n' +
-      '      Label: "[Aspek] — Estimasi Proxy" — butuh evidence\n' +
-      '   Panggil search_batch_proxies SEBELUM membuat semua MON-PRX\n' +
-      '9. search_batch_ddat(program_context, factors_needed) — 1 call\n' +
-      '10. create_node impact_adjustment_nodes + flag_for_verification\n' +
-      '11. create_node final_value_nodes, compute_fva, run_qa\n\n' +
-      'ATURAN SEARCH (total max 3 calls per full build):\n' +
+      '8. Untuk setiap aspek monetisasi, buat DUA node:\n' +
+      '   MON-[ASPEK]-INT (internal_report, placeholder) + MON-[ASPEK]-PRX (proxy, butuh evidence)\n' +
+      '   search_batch_proxies SEBELUM buat semua MON-PRX\n' +
+      '9. search_batch_ddat → create_node ADJ + flag_for_verification\n' +
+      '10. final_value_nodes, compute_fva, run_qa\n\n' +
+      'ATURAN REFINEMENT (perintah user setelah build):\n\n' +
+      'R1 — Jika user meminta TAMBAH PROBLEM NODE:\n' +
+      '  1. search_batch_problems(query spesifik, [node_id baru])\n' +
+      '  2. create_node problem dengan evidence dari search\n' +
+      '  3. link_nodes ke parent dan ke PROB-01 jika sub-problem\n\n' +
+      'R2 — Jika user meminta TAMBAH OUTCOME NODE:\n' +
+      '  1. create_node outcome_node (tanpa search)\n' +
+      '  2. Identifikasi aspek monetisasi yang relevan dari outcome tsb\n' +
+      '  3. Untuk setiap aspek:\n' +
+      '     a. create_node MON-[ASPEK]-INT (placeholder, tanpa search)\n' +
+      '     b. search_batch_proxies untuk aspek tsb\n' +
+      '     c. create_node MON-[ASPEK]-PRX dengan evidence\n' +
+      '  4. link_nodes outcome → indicator → MON\n\n' +
+      'R3 — Jika user meminta HAPUS NODE:\n' +
+      '  1. delete_node(node_id, collection, reasoning)\n' +
+      '  2. Lapor downstream yang terpengaruh\n' +
+      '  3. Tanya apakah perlu re-arrange downstream\n\n' +
+      'R4 — Jika user meminta CARIKAN EVIDENCE untuk node tertentu:\n' +
+      '  1. search_evidence(query, purpose, target_node_id) — 1 call\n' +
+      '  2. update_node dengan evidence_ids baru\n\n' +
+      'DETEKSI INTENT:\n' +
+      '  "tambah problem / masalah baru" → R1\n' +
+      '  "tambah outcome / manfaat / hasil baru" → R2\n' +
+      '  "hapus / delete [node_id]" → R3\n' +
+      '  "carikan / cari evidence / referensi untuk [node]" → R4\n' +
+      '  Selain itu → free-form, gunakan tools yang sesuai\n\n' +
+      'ATURAN SEARCH:\n' +
       '  search_batch_problems → 1 call, max 3 ref/node, URL wajib\n' +
       '  search_batch_proxies  → 1 call, max 2 ref/proxy\n' +
-      '  search_batch_ddat     → 1 call, 1 ref per faktor\n' +
+      '  search_batch_ddat     → 1 call, 1 ref/faktor\n' +
       '  Outcome, activity, output, indicator, MON-INT → TIDAK ADA search\n\n' +
       'CARA create_node:\n' +
-      '  node_id: "PROB-01.1" (WAJIB)\n' +
-      '  label: "Judul" (WAJIB)\n' +
-      '  evidence_ids: ["REF-AGT-..."] (dari batch search)\n' +
-      '  extra_fields: {dimension:"economic", description:"..."}\n' +
-      '  reasoning: "Alasan"\n\n' +
+      '  node_id:"PROB-01.1" label:"Judul" evidence_ids:[...] extra_fields:{...} reasoning:"..."\n\n' +
       'ATURAN ID:\n' +
-      '  problem: PROB-01, PROB-01.1 | outcome: OC-ECO-01 | activity: ACT_YYYY\n' +
-      '  MON internal: MON-JSP-INT | MON proxy: MON-JSP-PRX\n' +
-      '  adjustment: ADJ-JSP | final_value: FV_2023_MON-JSP-INT\n\n' +
+      '  problem:PROB-01,PROB-01.1 | outcome:OC-ECO-01 | activity:ACT_YYYY\n' +
+      '  MON internal:MON-JSP-INT | MON proxy:MON-JSP-PRX | adjustment:ADJ-JSP\n\n' +
       'SCHEMA:\n' + schema + ontCtx + '\n\n' +
-      'Gunakan bahasa Indonesia. Respond dalam bahasa Indonesia.';
+      'Gunakan bahasa Indonesia.';
 
     // Tambahkan pesan user ke history
     agentState.agentHistory.push({ role: 'user', content: userMessage });
