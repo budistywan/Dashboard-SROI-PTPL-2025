@@ -6648,7 +6648,7 @@
 
       if (!parsed.length) return;
 
-      // Simpan ke evidenceByNode
+      // Simpan ke evidenceByNode (array of ref objects, bukan hanya id)
       var nodeEvidence = agentState.evidenceByNode[targetNodeId] || [];
       parsed.forEach(function(ref) {
         if (!nodeEvidence.find(function(e){ return e.id === ref.id; })) {
@@ -6657,7 +6657,7 @@
       });
       agentState.evidenceByNode[targetNodeId] = nodeEvidence;
 
-      // Tambahkan ke problem_context.references di draftOntology
+      // Juga tambahkan ke problem_context.references (global registry)
       var ont = agentState.draftOntology;
       if (ont && ont.problem_context) {
         if (!ont.problem_context.references) ont.problem_context.references = [];
@@ -6668,16 +6668,17 @@
         });
       }
 
-      // Re-render card jika sudah ada
+      // Re-render card yang bersangkutan dengan evidence baru
       var card = document.getElementById('anc-' + targetNodeId);
-      if (card) {
-        // Cari node di draftOntology dan re-render
+      if (card && ont) {
         var allCols = ['problem_nodes','outcome_nodes','indicator_nodes','monetisation_pre_fix_nodes','impact_adjustment_nodes'];
         allCols.forEach(function(col) {
-          var node = (ont && ont[col] || []).find(function(n){ return n && n.id === targetNodeId; });
+          var node = (ont[col]||[]).find(function(n){ return n && n.id === targetNodeId; });
           if (node) {
-            node._agent_evidence = parsed.map(function(r){ return r.id; });
-            agentRenderCard(targetNodeId, col, node, node._agent_reasoning, node._agent_evidence);
+            // Simpan objek evidence langsung di node (bukan hanya ref_id)
+            node._agent_evidence_objects = nodeEvidence;
+            node._agent_evidence = nodeEvidence.map(function(r){ return r.id; });
+            agentRenderCard(targetNodeId, col, node, node._agent_reasoning, nodeEvidence);
           }
         });
       }
@@ -6998,16 +6999,48 @@
     var existingCard = document.getElementById('anc-' + nodeId);
 
     // Build evidence HTML
+    // evidenceIds bisa berupa: array of ref_id strings, atau array of ref objects langsung
     var ont = agentState.draftOntology;
-    var refs = ont && ont.problem_context && ont.problem_context.references ? ont.problem_context.references : [];
+    var globalRefs = ont && ont.problem_context && ont.problem_context.references ? ont.problem_context.references : [];
+
+    // Cek juga di evidenceByNode (yang disimpan oleh agentSearchEvidence)
+    var nodeEvidenceObjects = agentState.evidenceByNode[nodeId] || [];
+
     var evidHtml = '';
+    var evidItems = [];
+
     if (evidenceIds && evidenceIds.length) {
-      var items = evidenceIds.map(function(eid) {
-        var ref = refs.find(function(r){ return r.id === eid; });
-        if (ref) return '<div class="anc-evidence-item">↗ <a href="'+(ref.url||'#')+'" target="_blank">'+esc(ref.title||eid)+(ref.year?' ('+ref.year+')':'')+'</a></div>';
-        return '<div class="anc-evidence-item">↗ <span>'+esc(eid)+'</span></div>';
+      evidenceIds.forEach(function(e) {
+        if (typeof e === 'object' && e !== null) {
+          // Sudah berupa objek referensi
+          evidItems.push(e);
+        } else {
+          // String ref_id — lookup di global refs atau evidenceByNode
+          var ref = globalRefs.find(function(r){ return r.id === e; })
+                 || nodeEvidenceObjects.find(function(r){ return r.id === e; });
+          if (ref) evidItems.push(ref);
+          else evidItems.push({ id: e, title: e, url: '' });
+        }
+      });
+    }
+
+    // Tambahkan evidence dari evidenceByNode yang belum masuk
+    nodeEvidenceObjects.forEach(function(nev) {
+      if (!evidItems.find(function(ei){ return ei.id === nev.id; })) {
+        evidItems.push(nev);
+      }
+    });
+
+    if (evidItems.length) {
+      var items = evidItems.map(function(ref) {
+        var titleStr = esc(ref.title || ref.id || '?') + (ref.year ? ' (' + esc(ref.year) + ')' : '');
+        var noteStr  = ref.relevance_note ? '<div class="anc-evidence-note">' + esc(ref.relevance_note) + '</div>' : '';
+        if (ref.url && ref.url.startsWith('http')) {
+          return '<div class="anc-evidence-item">↗ <div><a href="' + esc(ref.url) + '" target="_blank">' + titleStr + '</a>' + noteStr + '</div></div>';
+        }
+        return '<div class="anc-evidence-item">↗ <div><span>' + titleStr + '</span>' + noteStr + '</div></div>';
       }).join('');
-      evidHtml = '<div class="anc-evidence"><div class="anc-evidence-label">📎 Evidence</div>'+items+'</div>';
+      evidHtml = '<div class="anc-evidence"><div class="anc-evidence-label">📎 Evidence</div>' + items + '</div>';
     }
 
     // Build fields HTML
