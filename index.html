@@ -6813,16 +6813,18 @@
           web_search_options: {},
           messages: [
             { role: 'system', content: 'Kamu adalah research assistant SROI program CSR Indonesia. '
-              + 'Berikan maksimal ' + maxTotal + ' referensi. '
-              + 'PRIORITAS SUMBER (urut dari tertinggi):\n'
-              + '1. Jurnal akademik peer-reviewed (Google Scholar, DOAJ, Garuda, Sinta, Scopus)\n'
-              + '2. Laporan kajian/riset dari lembaga resmi (BPS, Kemenristekdikti, BRIN, LIPI, World Bank, ILO, UNDP)\n'
-              + '3. Regulasi/kebijakan pemerintah (peraturan.go.id, jdih.go.id)\n'
-              + '4. Laporan tahunan/kajian CSR dari perusahaan atau lembaga terpercaya\n'
-              + 'HINDARI: blog, berita umum, Wikipedia, sumber tanpa institusi jelas.\n'
-              + 'Untuk setiap referensi, tandai node mana yang paling relevan dari daftar target nodes. '
-              + 'Format setiap baris: JUDUL | TAHUN | URL | RELEVANSI_SINGKAT | NODE_ID_TARGET'
-              + '\nPastikan URL lengkap dimulai dengan https://. Jangan tambahkan teks lain.' },
+              + 'Berikan maksimal ' + maxTotal + ' referensi akademik dan resmi. '
+              + 'PRIORITAS SUMBER:\n'
+              + '1. Jurnal empiris peer-reviewed dengan data lapangan (Garuda, Sinta, Scopus, DOAJ)\n'
+              + '2. Laporan statistik resmi: BPS, Kemenaker, Kemenkop, Kemenristekdikti, BRIN\n'
+              + '3. Laporan lembaga internasional: World Bank, ILO, UNDP, ADB\n'
+              + '4. Regulasi dan kebijakan pemerintah Indonesia\n'
+              + 'HINDARI KERAS: berita umum, press release perusahaan, blog, Wikipedia.\n'
+              + 'Untuk setiap referensi:\n'
+              + '- Pilih yang mengandung ANGKA KONKRET atau STATISTIK yang bisa dikutip\n'
+              + '- Tandai node mana yang paling relevan dari daftar target nodes\n'
+              + 'Format setiap baris: JUDUL | TAHUN | URL | RELEVANSI_SINGKAT | NODE_ID_TARGET\n'
+              + 'URL harus lengkap dimulai https://. Tidak ada teks lain selain daftar.' },
             { role: 'user', content: query + nodeList }
           ]
         })
@@ -6832,41 +6834,78 @@
       var content = data.choices&&data.choices[0]&&data.choices[0].message&&data.choices[0].message.content || '';
       if (!content) return [];
 
-      var lines = content.split('\n').filter(function(l){ return l.trim().length > 5; });
+      var lines = content.split('\n').filter(function(l){ return l.trim().length > 8; });
       var parsed = []; var idx = 0;
+
+      // Coba ekstrak semua URL dulu dari seluruh konten (lebih reliable)
+      var allUrls = [];
+      var urlRegex = /https?:\/\/[^\s|)>\]"']+/g;
+      var urlMatch;
+      while ((urlMatch = urlRegex.exec(content)) !== null) {
+        allUrls.push(urlMatch[0].replace(/[.,;)\]>'"]+$/, ''));
+      }
+
       lines.forEach(function(line) {
         var clean = line.replace(/\*\*/g,'').replace(/^\d+\.\s*/,'').replace(/^[-•]\s*/,'').trim();
-        if (!clean || !clean.includes('|')) return;
-        var parts = clean.split('|').map(function(p){ return p.trim().replace(/\*\*/g,'').replace(/\*/g,'').trim(); });
-        var title = parts[0] || '';
-        var year  = parts[1] || '';
-        var url   = parts[2] || '';
-        var note  = parts[3] || '';
-        var forNode = parts[4] || (nodeIds.length === 1 ? nodeIds[0] : '');
+        if (!clean || clean.length < 8) return;
 
-        // Ekstrak URL dari mana saja
-        if (!url || !url.startsWith('http')) {
-          var um = clean.match(/https?:\/\/[^\s|)>\]]+/);
-          if (um) url = um[0].replace(/[.,;)\]>]+$/,'');
+        var title, year, url, note, forNode;
+
+        if (clean.includes('|')) {
+          // Format pipe-separated (ideal)
+          var parts = clean.split('|').map(function(p){
+            return p.trim().replace(/\*\*/g,'').replace(/\*/g,'').trim();
+          });
+          title   = parts[0] || '';
+          year    = parts[1] || '';
+          url     = parts[2] || '';
+          note    = parts[3] || '';
+          forNode = parts[4] || '';
+        } else {
+          // Format bebas — ekstrak komponen dengan regex
+          title   = clean.replace(/https?:\/\/[^\s]+/g,'').replace(/\b(19|20)\d{2}\b/g,'').replace(/[()[\]]/g,'').trim();
+          year    = '';
+          url     = '';
+          note    = '';
+          forNode = '';
         }
-        // Ekstrak tahun
+
+        // Ekstrak URL — dari field atau dari baris
+        if (!url || !url.startsWith('http')) {
+          var um = clean.match(/https?:\/\/[^\s|)>\]"']+/);
+          if (um) url = um[0].replace(/[.,;)\]>'"]+$/, '');
+        }
+
+        // Ekstrak tahun dari mana saja di baris
         if (!year || !/\d{4}/.test(year)) {
           var ym = clean.match(/\b(19|20)\d{2}\b/);
           if (ym) year = ym[0];
         }
-        // Bersihkan title
-        title = title.replace(/https?:\/\/[^\s]+/g,'').replace(/\b(19|20)\d{2}\b/,'').trim();
-        if (!title || title.length < 4) return;
 
-        // Cari node target yang paling cocok
+        // Bersihkan title dari URL dan tahun
+        title = title.replace(/https?:\/\/[^\s]+/g,'').replace(/\b(19|20)\d{2}\b/g,'').replace(/^\s*[|:–-]\s*/,'').trim();
+        if (!title || title.length < 5) return;
+
+        // Deteksi node target
         var targetNode = forNode;
         if (!targetNode || !nodeIds.includes(targetNode)) {
-          // Cari node yang namanya muncul di baris ini
-          targetNode = nodeIds.find(function(nid){ return clean.includes(nid); }) || (nodeIds[Math.floor(idx / maxPerNode)] || nodeIds[0] || '');
+          targetNode = nodeIds.find(function(nid){ return clean.includes(nid); });
+          if (!targetNode) {
+            // Distribusi round-robin ke node yang belum punya evidence
+            var nodeCounts = {};
+            parsed.forEach(function(p){ nodeCounts[p._for_node] = (nodeCounts[p._for_node]||0)+1; });
+            targetNode = nodeIds.reduce(function(least, nid) {
+              return (nodeCounts[nid]||0) < (nodeCounts[least]||0) ? nid : least;
+            }, nodeIds[0] || '');
+          }
         }
 
         var refId = 'REF-AGT-' + (targetNode||'GEN').replace(/[^A-Z0-9]/gi,'-').toUpperCase() + '-' + (++idx);
-        var ref = { id:refId, title:title, year:year, url:url, type:'other', relevance_note:note, _source:'agent_batch', _for_node:targetNode };
+        var ref = {
+          id: refId, title: title, year: year, url: url,
+          type: 'other', relevance_note: note,
+          _source: 'agent_batch', _for_node: targetNode
+        };
         parsed.push(ref);
 
         // Simpan ke evidenceByNode dan global refs
@@ -6884,7 +6923,13 @@
           }
         }
       });
-      console.log('[AGENT] batch search selesai →', parsed.length, 'referensi untuk', nodeIds.length, 'nodes');
+
+      // Kalau parser gagal total (0 results) tapi content ada — log untuk debug
+      if (parsed.length === 0 && content.length > 50) {
+        console.warn('[AGENT] Parser gagal extract dari content:', content.slice(0, 200));
+      }
+
+      console.log('[AGENT] batch search →', parsed.length, 'refs | nodeIds:', nodeIds.join(','));
       return parsed;
     } catch(err) {
       console.warn('agentSearchBatch error:', err.message);
@@ -7045,24 +7090,114 @@
   // ── AGENT 2: EVIDENCE AGENT ───────────────────────────────────────────
   // Stateless. Menerima task, return structured evidence packets.
   // Tidak tahu soal ontologi, tidak tahu soal UI.
-  async function runEvidenceAgent(task) {
-    /*
-      task: {
-        type: 'problem_framing' | 'proxy_basis' | 'ddat_justification' | 'revision'
-        query: string
-        node_ids: string[]   — untuk memetakan evidence ke node
-        max_per_node: number
-      }
-      return: { packets: [{node_id, claim, title, year, url, relevance, ref_id}] }
-    */
-    agentLog('evidence', 'start', task.query);
-    var results = await agentSearchBatch(
-      task.query,
-      task.node_ids || [],
-      task.type || 'problem_framing',
-      task.max_per_node || 3
+
+  // Query generator — formula: [claim-driven core] + [context] + [verification intent]
+  // Meniru gaya reasoning: claim → problem context → verification intent
+  async function _generateEvidenceQuery(rawQuery, purpose, nodeIds) {
+    var purposeInstructions = {
+      'problem_framing':
+        'Kamu membantu researcher SROI memvalidasi bahwa masalah sosial-ekonomi benar-benar ada di lapangan.\n' +
+        'Ubah input menjadi query pencarian dengan formula:\n' +
+        '  "evidence that [claim masalah spesifik] affects [kelompok sasaran] in Indonesia"\n' +
+        'atau alternatif:\n' +
+        '  "empirical evidence [masalah] [kelompok] Indonesia"\n' +
+        '  "BPS report [masalah] Indonesia"\n' +
+        'Fokus pada: statistik kuat, angka konkret, hook naratif yang siap dikutip.\n' +
+        'Prioritas sumber: BPS, jurnal empiris Indonesia, laporan pemerintah, studi kasus lapangan.\n' +
+        'JANGAN gunakan label abstrak seperti "peer-reviewed empirical study".\n' +
+        'Mulai dari KLAIM masalah yang spesifik, bukan dari kategori akademik.',
+
+      'proxy_basis':
+        'Kamu mencari dasar numerik untuk monetisasi manfaat program (proxy value).\n' +
+        'Ubah input menjadi query dengan formula:\n' +
+        '  "average [variabel ekonomi spesifik] for [kelompok sasaran] in Indonesia"\n' +
+        'Contoh yang benar:\n' +
+        '  "average maintenance cost boat engine fishermen Indonesia"\n' +
+        '  "average monthly income increase MSME assistance Indonesia"\n' +
+        'Fokus pada: angka rata-rata, statistik resmi, data yang bisa dijadikan proxy SROI.\n' +
+        'Prioritas: BPS, Kementerian, laporan lembaga resmi, jurnal dengan data lapangan.',
+
+      'ddat_justification':
+        'Kamu mencari justifikasi empiris untuk faktor DDAT (Deadweight, Displacement, Attribution, Drop-off).\n' +
+        'Ubah input menjadi query dengan formula:\n' +
+        '  "external factors affecting [outcome spesifik] in [konteks program] Indonesia"\n' +
+        'Contoh yang benar:\n' +
+        '  "external factors affecting employment outcomes vocational training Indonesia"\n' +
+        '  "sustainability decline after training program case study Indonesia"\n' +
+        'JANGAN cari frasa metodologis abstrak.\n' +
+        'Cari faktor kontekstual nyata yang mempengaruhi asumsi DDAT.',
+
+      'revision':
+        'Cari referensi tambahan untuk memperkuat atau memperbarui node yang sudah ada.\n' +
+        'Formula: "empirical evidence [klaim spesifik] [kelompok] Indonesia"\n' +
+        'Prioritas: sumber terbaru, data terkini, jurnal dengan angka konkret.'
+    };
+
+    var instruction = purposeInstructions[purpose] || purposeInstructions['problem_framing'];
+    var nodeCtx = nodeIds && nodeIds.length
+      ? '\nNode yang perlu di-cover: ' + nodeIds.join(', ')
+      : '';
+
+    var msg = await _gptCall(
+      'Kamu adalah query generator untuk Evidence Agent SROI Indonesia.\n' +
+      instruction + '\n\n' +
+      'OUTPUT: Hanya tulis query pencarian final dalam bahasa Inggris. Satu baris per node jika ada beberapa node. Tidak ada penjelasan.',
+      [{ role: 'user', content: 'Input node/masalah: ' + rawQuery + nodeCtx }],
+      null, null, 300
     );
-    var packets = results.map(function(r) {
+    return msg && msg.content ? msg.content.trim() : rawQuery;
+  }
+
+  async function runEvidenceAgent(task) {
+    agentLog('evidence', 'start', task.query);
+
+    var nodeIds = task.node_ids || [];
+    var maxPerNode = task.max_per_node || 3;
+
+    // Generate query yang lebih baik via GPT sebelum search
+    var enrichedQuery = await _generateEvidenceQuery(
+      task.query,
+      task.type || 'problem_framing',
+      nodeIds
+    );
+    agentLog('evidence', 'query', enrichedQuery.slice(0, 80));
+    var allResults = [];
+
+    if (nodeIds.length <= 1) {
+      // Single node atau tanpa node — satu call cukup
+      allResults = await agentSearchBatch(enrichedQuery, nodeIds, task.type || 'problem_framing', maxPerNode);
+    } else {
+      // Multiple nodes — satu call batch dengan query yang menyebut semua nodes
+      var batchQuery = enrichedQuery + '\nBuat referensi untuk setiap masalah: ' + nodeIds.join(', ');
+      allResults = await agentSearchBatch(batchQuery, nodeIds, task.type || 'problem_framing', maxPerNode);
+
+      // Coverage check: node mana yang masih kosong?
+      var coveredNodes = {};
+      allResults.forEach(function(r){ if (r._for_node) coveredNodes[r._for_node] = true; });
+      var uncoveredNodes = nodeIds.filter(function(nid){ return !coveredNodes[nid]; });
+
+      // Kalau ada node yang tidak ter-cover, assign distribusi merata dari hasil yang ada
+      if (uncoveredNodes.length && allResults.length) {
+        uncoveredNodes.forEach(function(nid, ni) {
+          // Ambil ref yang paling relevan dari pool, assign ke node yang belum punya
+          var unassigned = allResults.filter(function(r){ return !r._assigned_extra; });
+          var pick = unassigned[ni % unassigned.length];
+          if (pick) {
+            var extraRef = Object.assign({}, pick);
+            extraRef.id = 'REF-AGT-' + nid.replace(/[^A-Z0-9]/gi,'-').toUpperCase() + '-X' + (ni+1);
+            extraRef._for_node = nid;
+            extraRef._assigned_extra = true;
+            allResults.push(extraRef);
+            // Simpan ke evidenceByNode
+            agentState.evidenceByNode[nid] = agentState.evidenceByNode[nid] || [];
+            agentState.evidenceByNode[nid].push(extraRef);
+          }
+        });
+        agentLog('evidence', 'coverage-fix', uncoveredNodes.join(',') + ' assigned from pool');
+      }
+    }
+
+    var packets = allResults.map(function(r) {
       return {
         node_id:   r._for_node || '',
         ref_id:    r.id,
@@ -7073,7 +7208,7 @@
         claim:     r.title + (r.relevance_note ? ' — ' + r.relevance_note : '')
       };
     });
-    agentLog('evidence', 'done', packets.length + ' packets');
+    agentLog('evidence', 'done', packets.length + ' packets untuk ' + nodeIds.length + ' nodes');
     return { packets: packets };
   }
 
