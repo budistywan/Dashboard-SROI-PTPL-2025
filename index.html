@@ -1387,6 +1387,11 @@
     .agent-commit-stats { font-size:11.5px; color:var(--muted); flex:1; }
     .agent-commit-stats strong { color:var(--text); }
     .agent-sroi-preview { font-size:12px; font-weight:800; color:#059669; font-family:var(--mono); padding:3px 10px; background:#dcfce7; border-radius:20px; }
+    .anc-edit-form textarea:focus,
+    .anc-edit-form input:focus,
+    .anc-edit-form select:focus { border-color: #2563eb !important; outline: none; }
+    .anc-edit-form { animation: slideDown 0.15s ease; }
+    @keyframes slideDown { from { opacity:0; transform:translateY(-6px); } to { opacity:1; transform:translateY(0); } }
     /* ── END AGENT ENGINE CSS ── */
   </style>
 </head>
@@ -7533,21 +7538,401 @@
     agentUpdateCommitBar();
   };
 
+  // ── EXECUTE REARRANGE — cascade changes after edit/delete ─────────────
+  function executeRearrange(changedNodeId, changeType, changeDetail, proposal) {
+    var ont = agentState.draftOntology;
+    if (!ont) return;
+    var changes = proposal || [];
+
+    changes.forEach(function(op) {
+      switch(op.type) {
+        case 'update_field': {
+          var cols = ['problem_nodes','activity_nodes','outcome_nodes','indicator_nodes',
+            'monetisation_pre_fix_nodes','impact_adjustment_nodes','final_value_nodes',
+            'final_value_aggregates','output_delivery_nodes','baseline_nodes'];
+          cols.forEach(function(col) {
+            var node = (ont[col]||[]).find(function(n){ return n && n.id === op.node_id; });
+            if (node && op.field && op.value !== undefined) {
+              node[op.field] = op.value;
+              agentRenderCard(op.node_id, col, node, node._agent_reasoning, node._agent_evidence_objects || node._agent_evidence || []);
+            }
+          });
+          break;
+        }
+        case 'recalculate_fv': {
+          // Recalculate net_value_computed untuk FV node
+          var fvNodes = ont.final_value_nodes || [];
+          fvNodes.forEach(function(fv) {
+            if (!fv) return;
+            if (op.node_id && fv.id !== op.node_id) return;
+            if (fv.gross_value !== undefined && fv.net_multiplier !== undefined) {
+              fv.net_value_computed = Math.round(fv.gross_value * fv.net_multiplier);
+              agentRenderCard(fv.id, 'final_value_nodes', fv, fv._agent_reasoning, fv._agent_evidence || []);
+            }
+          });
+          break;
+        }
+        case 'recalculate_fva': {
+          // Recalculate FVA dari FV nodes
+          var years = op.years || [];
+          years.forEach(function(yr) {
+            var total = 0;
+            (ont.final_value_nodes||[]).forEach(function(fv) {
+              if (fv && fv.origin_year === yr) total += (fv.net_value_computed || 0);
+            });
+            var fva = (ont.final_value_aggregates||[]).find(function(f){ return f && f.year === yr; });
+            if (fva) {
+              fva.amount_idr = Math.round(total);
+              agentRenderCard(fva.id, 'final_value_aggregates', fva, fva._agent_reasoning, []);
+            }
+          });
+          break;
+        }
+        case 'flag_needs_review': {
+          // Flag downstream node untuk review
+          var allCols2 = ['outcome_nodes','indicator_nodes','monetisation_pre_fix_nodes',
+            'impact_adjustment_nodes','final_value_nodes'];
+          allCols2.forEach(function(col) {
+            var node = (ont[col]||[]).find(function(n){ return n && n.id === op.node_id; });
+            if (node) {
+              node._agent_status = 'flagged';
+              agentUpdateCardStatus(op.node_id, 'flagged');
+            }
+          });
+          break;
+        }
+      }
+    });
+
+    agentUpdateCommitBar();
+    agentUpdateProgressBar();
+  }
+
+  // Build rearrange proposal dari impact assessment
+  function buildRearrangeProposal(impact, changeDetail) {
+    var proposal = [];
+    var ont = agentState.draftOntology;
+    if (!ont) return proposal;
+
+    impact.downstream_ids.forEach(function(downId) {
+      // Cari node ini di semua collections
+      var allCols = ['outcome_nodes','indicator_nodes','monetisation_pre_fix_nodes',
+        'impact_adjustment_nodes','final_value_nodes','final_value_aggregates'];
+      allCols.forEach(function(col) {
+        var node = (ont[col]||[]).find(function(n){ return n && n.id === downId; });
+        if (!node) return;
+
+        if (col === 'final_value_nodes') {
+          // Recalculate FV jika multiplier berubah
+          if (changeDetail.field === 'net_multiplier') {
+            var newMult = changeDetail.new;
+            proposal.push({ type: 'update_field', node_id: downId, field: 'net_multiplier', value: newMult });
+            proposal.push({ type: 'recalculate_fv', node_id: downId });
+          } else {
+            proposal.push({ type: 'flag_needs_review', node_id: downId });
+          }
+        } else if (col === 'final_value_aggregates') {
+          proposal.push({ type: 'recalculate_fva', years: [node.year] });
+        } else {
+          proposal.push({ type: 'flag_needs_review', node_id: downId });
+        }
+      });
+    });
+    return proposal;
+  }
+
+  // ── INLINE EDIT — form di dalam card ──────────────────────────────────
+  // Field definitions per collection
+  function agentEditFields(col, node) {
+    var common = [
+      { key: 'label', label: 'Label', type: 'text' },
+      { key: 'description', label: 'Deskripsi', type: 'textarea' }
+    ];
+    var extra = {
+      problem_nodes: [
+        { key: 'dimension', label: 'Dimensi', type: 'select',
+          options: ['economic','social','environmental','well_being'] },
+        { key: 'problem_type', label: 'Tipe', type: 'select',
+          options: ['structural_gap','capability_gap','transition_risk','alignment_gap','entrepreneurship_gap','value_chain_gap'] }
+      ],
+      outcome_nodes: [
+        { key: 'dimension', label: 'Dimensi', type: 'select',
+          options: ['economic','social','environmental','well_being'] }
+      ],
+      indicator_nodes: [
+        { key: 'indicator', label: 'Nama Indikator', type: 'text' },
+        { key: 'unit', label: 'Unit', type: 'text' },
+        { key: 'proxy_value_idr', label: 'Proxy Value (Rp)', type: 'number' },
+        { key: 'proxy_justification', label: 'Justifikasi Proxy', type: 'textarea' }
+      ],
+      monetisation_pre_fix_nodes: [
+        { key: 'aspect', label: 'Aspek', type: 'text' },
+        { key: 'proxy_basis', label: 'Dasar Proxy', type: 'textarea' },
+        { key: 'net_multiplier', label: 'Net Multiplier (0-1)', type: 'number' }
+      ],
+      impact_adjustment_nodes: [
+        { key: 'net_multiplier', label: 'Net Multiplier (0-1)', type: 'number' },
+        { key: 'source_monetisation_id', label: 'Source MON ID', type: 'text' }
+      ],
+      final_value_nodes: [
+        { key: 'gross_value', label: 'Gross Value (Rp)', type: 'number' },
+        { key: 'net_multiplier', label: 'Net Multiplier', type: 'number' },
+        { key: 'net_value_computed', label: 'Net Value Computed (Rp)', type: 'number' }
+      ]
+    };
+    return common.concat(extra[col] || []);
+  }
+
   window.agentEditNode = function(nodeId, col) {
     var ont = agentState.draftOntology;
     var node = (ont&&ont[col]||[]).find(function(n){ return n&&n.id===nodeId; });
     if (!node) return;
-    var newLabel = prompt('Edit label node ' + nodeId + ':', node.label || node.name || node.aspect || '');
-    if (newLabel === null) return;
-    var oldLabel = node.label || node.name;
-    node.label = newLabel;
+
+    var fields = agentEditFields(col, node);
+    var card = document.getElementById('anc-' + nodeId);
+    if (!card) return;
+
+    // Cek apakah sudah ada form edit terbuka di card ini
+    var existingForm = card.querySelector('.anc-edit-form');
+    if (existingForm) { existingForm.remove(); return; }
+
+    // Build form HTML
+    var formHtml = '<div class="anc-edit-form" style="margin:0 13px 12px;padding:12px;background:#f8fafc;border:1.5px solid #bfdbfe;border-radius:10px;">'
+      + '<div style="font-size:10px;font-weight:800;color:#1e40af;text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px;">✏ Edit Node</div>';
+
+    fields.forEach(function(f) {
+      var val = node[f.key] !== undefined ? node[f.key] : '';
+      formHtml += '<div style="margin-bottom:8px;">'
+        + '<label style="font-size:10.5px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;display:block;margin-bottom:3px;">' + esc(f.label) + '</label>';
+      if (f.type === 'textarea') {
+        formHtml += '<textarea data-field="'+f.key+'" style="width:100%;border:1.5px solid var(--border);border-radius:8px;padding:7px 10px;font:inherit;font-size:12px;resize:vertical;min-height:60px;outline:none;" onfocus="this.style.borderColor=\'#2563eb\'" onblur="this.style.borderColor=\'\'">'+esc(String(val))+'</textarea>';
+      } else if (f.type === 'select') {
+        formHtml += '<select data-field="'+f.key+'" style="width:100%;border:1.5px solid var(--border);border-radius:8px;padding:6px 10px;font:inherit;font-size:12px;outline:none;">';
+        (f.options||[]).forEach(function(opt) {
+          formHtml += '<option value="'+opt+'"'+(val===opt?' selected':'')+'>'+opt+'</option>';
+        });
+        formHtml += '</select>';
+      } else {
+        formHtml += '<input type="'+(f.type||'text')+'" data-field="'+f.key+'" value="'+esc(String(val))+'" style="width:100%;border:1.5px solid var(--border);border-radius:8px;padding:6px 10px;font:inherit;font-size:12px;outline:none;" onfocus="this.style.borderColor=\'#2563eb\'" onblur="this.style.borderColor=\'\'">';
+      }
+      formHtml += '</div>';
+    });
+
+    formHtml += '<div style="display:flex;gap:8px;margin-top:10px;">'
+      + '<button onclick="agentSaveEdit(\''+nodeId+'\',\''+col+'\')" style="padding:6px 14px;background:#2563eb;color:white;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;">Simpan</button>'
+      + '<button onclick="agentCancelEdit(\''+nodeId+'\')" style="padding:6px 12px;background:white;color:var(--muted);border:1.5px solid var(--border);border-radius:8px;font-size:12px;cursor:pointer;">Batal</button>'
+      + '</div></div>';
+
+    // Inject form sebelum anc-actions
+    var actions = card.querySelector('.anc-actions');
+    if (actions) {
+      var formEl = document.createElement('div');
+      formEl.innerHTML = formHtml;
+      card.insertBefore(formEl.firstElementChild, actions);
+    }
+  };
+
+  window.agentCancelEdit = function(nodeId) {
+    var card = document.getElementById('anc-' + nodeId);
+    if (!card) return;
+    var form = card.querySelector('.anc-edit-form');
+    if (form) form.remove();
+  };
+
+  window.agentSaveEdit = function(nodeId, col) {
+    var ont = agentState.draftOntology;
+    var node = (ont&&ont[col]||[]).find(function(n){ return n&&n.id===nodeId; });
+    if (!node) return;
+    var card = document.getElementById('anc-' + nodeId);
+    if (!card) return;
+    var form = card.querySelector('.anc-edit-form');
+    if (!form) return;
+
+    // Kumpulkan semua perubahan
+    var changes = {};
+    var hasChange = false;
+    form.querySelectorAll('[data-field]').forEach(function(el) {
+      var field = el.dataset.field;
+      var oldVal = node[field];
+      var newVal = el.type === 'number' ? (el.value !== '' ? Number(el.value) : null) : el.value;
+      if (String(oldVal) !== String(newVal)) {
+        changes[field] = { old: oldVal, new: newVal };
+        node[field] = newVal;
+        hasChange = true;
+      }
+    });
+
+    form.remove();
+
+    if (!hasChange) return;
+
     // Assess impact
-    var impact = agentAssessImpact(nodeId, 'edit', { field: 'label', old: oldLabel, new: newLabel });
+    var firstChange = Object.keys(changes)[0];
+    var impact = agentAssessImpact(nodeId, 'edit', {
+      field: firstChange,
+      old: changes[firstChange] && changes[firstChange].old,
+      new: changes[firstChange] && changes[firstChange].new
+    });
     agentState.lastImpact = impact;
+
     // Re-render card
-    agentRenderCard(nodeId, col, node, node._agent_reasoning, node._agent_evidence || []);
-    if (impact.level > 1 || impact.downstream_ids.length > 0) {
+    agentRenderCard(nodeId, col, node, node._agent_reasoning, node._agent_evidence_objects || node._agent_evidence || []);
+
+    // Handle cascade berdasarkan level
+    if (impact.level === 1 && impact.downstream_ids.length > 0) {
+      // Build proposal otomatis dan tawarka ke user
+      var proposal = buildRearrangeProposal(impact, { field: firstChange, new: node[firstChange] });
+      if (proposal.length > 0) {
+        agentShowRearrangeOffer(nodeId, impact, proposal);
+      }
+    } else if (impact.level >= 2) {
       agentAppendImpactBanner(impact, nodeId);
+    }
+  };
+
+  function agentShowRearrangeOffer(nodeId, impact, proposal) {
+    var scroll = document.getElementById('agentChatScroll');
+    if (!scroll) return;
+    var affectedList = impact.downstream_ids.slice(0,5).join(', ') + (impact.downstream_ids.length>5?'...':'');
+    var div = document.createElement('div');
+    div.className = 'agent-bubble agent';
+    div.style.cssText = 'border-color:#bfdbfe;background:#eff6ff;';
+    div.innerHTML = '<div class="agent-bubble-label" style="color:#1e40af;">💡 Re-arrange</div>'
+      + '<div style="font-size:12.5px;margin-bottom:8px;">Perubahan pada <strong>' + esc(nodeId) + '</strong> berdampak ke '
+      + impact.downstream_ids.length + ' node: ' + esc(affectedList) + '</div>'
+      + '<div style="display:flex;gap:8px;">'
+      + '<button onclick="(function(el){'
+      +   'executeRearrange(\''+nodeId+'\',\'edit\',{},'+JSON.stringify(proposal)+');'
+      +   'el.parentElement.parentElement.innerHTML=\'<div style=\\\"font-size:12px;color:#059669;\\\">✓ Re-arrange diterapkan</div>\';'
+      + '})(this)" style="padding:5px 14px;background:#2563eb;color:white;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;">Terapkan otomatis</button>'
+      + '<button onclick="this.parentElement.parentElement.remove()" style="padding:5px 12px;background:white;color:var(--muted);border:1.5px solid var(--border);border-radius:8px;font-size:12px;cursor:pointer;">Saya atur manual</button>'
+      + '</div>';
+    scroll.appendChild(div);
+    scroll.scrollTop = scroll.scrollHeight;
+  }
+
+  // ── COMMIT dengan DIFF PREVIEW ─────────────────────────────────────────
+  window.agentCommit = function() {
+    var ont = agentState.draftOntology;
+    if (!ont) return;
+
+    var pending = agentState.pendingVerifications.filter(function(v){ return v.status==='pending'; });
+    var allCards = document.querySelectorAll('#agentCardsScroll .agent-node-card');
+    var approvedCards = document.querySelectorAll('#agentCardsScroll .agent-node-card.approved');
+    var flaggedCards = document.querySelectorAll('#agentCardsScroll .agent-node-card.flagged');
+    var draftCards = document.querySelectorAll('#agentCardsScroll .agent-node-card.draft');
+
+    // Hitung stats untuk diff
+    var totalNodes = allCards.length;
+    var approvedCount = approvedCards.length;
+    var flaggedCount = flaggedCards.length;
+    var draftCount = draftCards.length;
+
+    // Hitung node per collection
+    var colStats = {};
+    var cols = ['problem_nodes','activity_nodes','outcome_nodes','indicator_nodes',
+      'monetisation_pre_fix_nodes','impact_adjustment_nodes','final_value_nodes','final_value_aggregates'];
+    cols.forEach(function(col) {
+      var count = (ont[col]||[]).length;
+      if (count > 0) colStats[col] = count;
+    });
+
+    // FVA total
+    var fvaTotal = (ont.final_value_aggregates||[]).reduce(function(s,f){ return s+(f&&f.amount_idr||0); }, 0);
+
+    // Render diff preview modal
+    agentShowCommitPreview({
+      totalNodes: totalNodes,
+      approvedCount: approvedCount,
+      flaggedCount: flaggedCount,
+      draftCount: draftCount,
+      pendingCount: pending.length,
+      colStats: colStats,
+      fvaTotal: fvaTotal,
+      ont: ont
+    });
+  };
+
+  function agentShowCommitPreview(stats) {
+    // Hapus preview lama kalau ada
+    var old = document.getElementById('agentCommitPreview');
+    if (old) old.remove();
+
+    var colLabels = {
+      problem_nodes: 'Problem', activity_nodes: 'Activity',
+      outcome_nodes: 'Outcome', indicator_nodes: 'Indicator',
+      monetisation_pre_fix_nodes: 'Monetisasi', impact_adjustment_nodes: 'Adjustment',
+      final_value_nodes: 'Final Value', final_value_aggregates: 'FVA'
+    };
+
+    var colRows = Object.entries(stats.colStats).map(function(e) {
+      return '<div style="display:flex;justify-content:space-between;font-size:12px;padding:3px 0;border-bottom:1px solid #f1f5f9;">'
+        + '<span style="color:var(--muted);">' + (colLabels[e[0]]||e[0]) + '</span>'
+        + '<span style="font-weight:700;">' + e[1] + ' nodes</span></div>';
+    }).join('');
+
+    var warnings = [];
+    if (stats.flaggedCount > 0) warnings.push('⚠ ' + stats.flaggedCount + ' node masih FLAGGED (belum dikonfirmasi)');
+    if (stats.pendingCount > 0) warnings.push('⚠ ' + stats.pendingCount + ' verifikasi belum diselesaikan');
+    if (stats.draftCount > 0) warnings.push('ℹ ' + stats.draftCount + ' node masih DRAFT (belum di-approve)');
+
+    var overlay = document.createElement('div');
+    overlay.id = 'agentCommitPreview';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(13,17,23,.6);z-index:200;display:flex;align-items:center;justify-content:center;padding:20px;';
+    overlay.innerHTML = '<div style="background:white;border-radius:18px;padding:28px;width:min(480px,100%);box-shadow:0 24px 80px rgba(0,0,0,.18);max-height:85vh;overflow-y:auto;">'
+      + '<div style="font-size:17px;font-weight:800;color:#0f172a;margin-bottom:4px;">💾 Commit ke Ontologi Utama</div>'
+      + '<div style="font-size:12.5px;color:var(--muted);margin-bottom:20px;">Preview sebelum menyimpan ke localStorage</div>'
+
+      // Stats summary
+      + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px;">'
+      + '<div style="background:#f0fdf4;border:1px solid #a7f3d0;border-radius:10px;padding:10px 14px;text-align:center;">'
+      + '<div style="font-size:22px;font-weight:800;color:#059669;">'+stats.approvedCount+'</div>'
+      + '<div style="font-size:11px;color:#059669;font-weight:700;">Approved</div></div>'
+      + '<div style="background:#f8fafc;border:1px solid var(--border);border-radius:10px;padding:10px 14px;text-align:center;">'
+      + '<div style="font-size:22px;font-weight:800;color:var(--text);">'+stats.totalNodes+'</div>'
+      + '<div style="font-size:11px;color:var(--muted);font-weight:700;">Total Nodes</div></div>'
+      + '</div>'
+
+      // Collection breakdown
+      + '<div style="margin-bottom:14px;">'
+      + '<div style="font-size:10px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px;">Breakdown</div>'
+      + colRows + '</div>'
+
+      // FVA
+      + (stats.fvaTotal > 0 ? '<div style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:10px;padding:10px 14px;margin-bottom:14px;">'
+        + '<div style="font-size:11px;color:#0369a1;font-weight:700;margin-bottom:2px;">Net Benefit Draft (FVA)</div>'
+        + '<div style="font-size:16px;font-weight:800;color:#0c4a6e;">Rp ' + Math.round(stats.fvaTotal/1000000) + ' juta</div>'
+        + '</div>' : '')
+
+      // Warnings
+      + (warnings.length ? '<div style="margin-bottom:16px;">'
+        + warnings.map(function(w){
+            return '<div style="font-size:12px;padding:6px 10px;border-radius:8px;margin-bottom:4px;background:'+(w.startsWith('⚠')?'#fffbeb':'#f8fafc')+';color:'+(w.startsWith('⚠')?'#92400e':'#475569')+';">'+esc(w)+'</div>';
+          }).join('')
+        + '</div>' : '')
+
+      // Actions
+      + '<div style="display:flex;gap:10px;">'
+      + '<button onclick="agentDoCommit()" style="flex:1;padding:10px;background:#059669;color:white;border:none;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer;">✓ Commit Sekarang</button>'
+      + '<button onclick="document.getElementById(\'agentCommitPreview\').remove()" style="padding:10px 16px;background:white;color:var(--muted);border:1.5px solid var(--border);border-radius:10px;font-size:13px;cursor:pointer;">Batal</button>'
+      + '</div></div>';
+
+    document.body.appendChild(overlay);
+    // Klik di luar untuk tutup
+    overlay.addEventListener('click', function(e){ if(e.target===overlay) overlay.remove(); });
+  }
+
+  window.agentDoCommit = function() {
+    var preview = document.getElementById('agentCommitPreview');
+    if (preview) preview.remove();
+    try {
+      AGENT_INTERFACE.commitToMain(agentState.draftOntology);
+      agentAppendBubble('agent', '✅ Ontologi berhasil di-commit ke sistem. Tutup modal untuk melihat hasilnya di dashboard.');
+      var commitBtn = document.getElementById('agentCommitBtn');
+      if (commitBtn) commitBtn.disabled = true;
+      renderApp();
+    } catch(err) {
+      agentAppendBubble('agent', '⚠ Gagal commit: ' + err.message);
     }
   };
 
@@ -7901,20 +8286,6 @@
   window.agentRunQA = function() {
     var flags = agentRunQALogic('full');
     agentRenderQAFlags(flags);
-  };
-
-  window.agentCommit = function() {
-    var pending = agentState.pendingVerifications.filter(function(v){ return v.status==='pending'; });
-    if (pending.length) { alert('Masih ada ' + pending.length + ' verifikasi yang belum diselesaikan.'); return; }
-    if (!confirm('Commit draft ke ontologi utama? Ini akan menyimpan ke localStorage.')) return;
-    try {
-      AGENT_INTERFACE.commitToMain(agentState.draftOntology);
-      agentAppendBubble('agent', '✅ Ontologi berhasil di-commit ke sistem. Silakan tutup modal dan lihat hasilnya di dashboard.');
-      document.getElementById('agentCommitBtn') && (document.getElementById('agentCommitBtn').disabled = true);
-      renderApp(); // refresh dashboard
-    } catch(err) {
-      agentAppendBubble('agent', '⚠ Gagal commit: ' + err.message);
-    }
   };
 
   /* ── END AGENT ENGINE ─────────────────────────────────────────────── */
