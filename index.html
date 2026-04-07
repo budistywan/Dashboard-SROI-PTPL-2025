@@ -6337,7 +6337,7 @@
       type: 'function',
       function: {
         name: 'search_evidence',
-        description: 'Cari referensi untuk mendukung node. PENTING: tool ini berjalan di background — hasilnya TIDAK dikembalikan ke kamu. Setelah memanggil tool ini, LANGSUNG lanjut ke create_node atau tool berikutnya, JANGAN menunggu. Wajib dipanggil sebelum problem_node dan proxy MON node, tapi jangan tunggu hasilnya.',
+        description: 'Cari referensi untuk mendukung sebuah node. Tool ini SYNCHRONOUS — hasilnya langsung dikembalikan ke kamu berisi daftar referensi dengan IDs. Gunakan IDs tersebut di evidence_ids saat create_node berikutnya. WAJIB dipanggil sebelum problem_node dan proxy MON node.',
         parameters: {
           type: 'object',
           properties: {
@@ -6448,7 +6448,7 @@
   ];
 
   // ── AGENT TOOL EXECUTOR ───────────────────────────────────────────────
-  function agentToolExecutor(toolName, args) {
+  async function agentToolExecutor(toolName, args) {
     var ont = agentState.draftOntology;
     if (!ont) return { error: 'Draft ontologi belum diinisialisasi' };
 
@@ -6481,10 +6481,18 @@
           console.warn('[AGENT] Duplikat ID:', data.id, '— skip');
           return { error: 'Node ' + data.id + ' sudah ada di ' + col };
         }
-        console.log('[AGENT] create_node:', data.id, 'di', col, '| label:', data.label);
+        console.log('[AGENT] create_node:', data.id, 'di', col, '| label:', data.label, '| evidence_ids:', args.evidence_ids||[]);
         ont[col].push(data);
+
+        // Simpan objek evidence ke node langsung dari evidenceByNode
+        // (sudah diisi oleh search_evidence yang sync sebelumnya)
+        var nodeEvidObjs = agentState.evidenceByNode[data.id] || [];
+        if (nodeEvidObjs.length) {
+          data._agent_evidence_objects = nodeEvidObjs;
+        }
+
         agentState.opLog.push({ id: opId, tool: 'create_node', collection: col, node_id: data.id, reasoning: args.reasoning });
-        agentRenderCard(data.id, col, data, args.reasoning, args.evidence_ids || []);
+        agentRenderCard(data.id, col, data, args.reasoning, nodeEvidObjs.length ? nodeEvidObjs : (args.evidence_ids || []));
         return { success: true, node_id: data.id, collection: col };
       }
 
@@ -6503,13 +6511,27 @@
       }
 
       case 'search_evidence': {
-        // Actual search dilakukan async via agentSearchEvidence()
-        // Tool executor hanya log intent, search dijalankan background
         agentState.opLog.push({ id: opId, tool: 'search_evidence', query: args.query, purpose: args.purpose, target: args.target_node_id });
         agentState.evidenceByNode[args.target_node_id] = agentState.evidenceByNode[args.target_node_id] || [];
-        // Jalankan search async — tidak block tool loop
-        agentSearchEvidence(args.query, args.target_node_id, args.purpose);
-        return { success: true, message: 'Search dimulai di background untuk node ' + args.target_node_id + '. LANJUTKAN ke create_node sekarang — jangan tunggu hasil search.' };
+        console.log('[AGENT] search_evidence → target:', args.target_node_id, '| query:', args.query);
+
+        // SYNC — await hasil, return ke GPT agar bisa dipakai saat create_node berikutnya
+        var searchResults = await agentSearchEvidence(args.query, args.target_node_id, args.purpose);
+
+        // Ringkasan untuk GPT (title + relevance, tanpa URL panjang)
+        var summary = searchResults.map(function(r, i) {
+          return (i+1) + '. [' + r.id + '] ' + r.title + (r.year ? ' (' + r.year + ')' : '') +
+                 (r.relevance_note ? ' — ' + r.relevance_note : '');
+        }).join('\n');
+
+        return {
+          success: true,
+          node_id: args.target_node_id,
+          count: searchResults.length,
+          references: searchResults.map(function(r){ return { id: r.id, title: r.title, year: r.year }; }),
+          summary: summary || 'Tidak ada referensi ditemukan.',
+          instruction: 'Gunakan reference IDs di atas pada field evidence_ids saat create_node untuk ' + args.target_node_id + '.'
+        };
       }
 
       case 'flag_for_verification': {
@@ -6589,6 +6611,32 @@
         agentState.mode = 'reviewing';
         agentUpdateModeBar('reviewing', 'Checkpoint — Review Draft Awal', args.summary || '');
         agentState.opLog.push({ id: opId, tool: 'checkpoint', summary: args.summary });
+
+        // Hitung ringkasan nodes yang sudah dibuat
+        var ont = agentState.draftOntology;
+        var probCount = (ont && ont.problem_nodes || []).length;
+        var ocCount   = (ont && ont.outcome_nodes  || []).length;
+
+        // Render checkpoint card di chat dengan tombol Lanjut
+        var scroll = document.getElementById('agentChatScroll');
+        if (scroll) {
+          var ckDiv = document.createElement('div');
+          ckDiv.className = 'agent-bubble agent';
+          ckDiv.style.cssText = 'border:1.5px solid #a7f3d0;background:#f0fdf8;';
+          ckDiv.innerHTML = '<div class="agent-bubble-label" style="color:#059669;">✅ Checkpoint</div>'
+            + '<div style="font-size:13px;line-height:1.6;margin-bottom:10px;">'
+            + (args.summary || 'Draft awal selesai.') + '<br><br>'
+            + '<strong>' + probCount + '</strong> problem nodes · <strong>' + ocCount + '</strong> outcome nodes sudah dibuat.'
+            + '</div>'
+            + '<div style="font-size:12px;color:#374151;margin-bottom:10px;">Silakan review cards di kanan. Edit, hapus, atau tambah node sesuai kebutuhan.</div>'
+            + '<div style="display:flex;gap:8px;flex-wrap:wrap;">'
+            + '<button onclick="agentContinueBuild()" style="padding:7px 16px;background:#059669;color:white;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;">▶ Lanjutkan Build (layer berikutnya)</button>'
+            + '<button onclick="agentRunQA()" style="padding:7px 16px;background:#f8fafc;color:#374151;border:1.5px solid #e2e8f0;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;">🔍 QA Sekarang</button>'
+            + '</div>';
+          scroll.appendChild(ckDiv);
+          scroll.scrollTop = scroll.scrollHeight;
+        }
+
         return { success: true, awaiting_human: true };
       }
 
@@ -6600,7 +6648,7 @@
   // ── EVIDENCE SEARCH via gpt-4o-search-preview ────────────────────────
   async function agentSearchEvidence(query, targetNodeId, purpose) {
     var key = AGENT_INTERFACE.getGPTKey();
-    if (!key) return;
+    if (!key) return [];
 
     try {
       var purposePrompt = {
@@ -6619,45 +6667,80 @@
           max_tokens: 1500,
           web_search_options: {},
           messages: [
-            { role: 'system', content: 'Kamu adalah research assistant untuk analisis SROI program CSR Indonesia. Berikan 3-5 referensi terpercaya (pemerintah, jurnal, laporan resmi) yang relevan. Format setiap referensi: JUDUL | TAHUN | URL | RELEVANSI_SINGKAT' },
+            { role: 'system', content: 'Kamu adalah research assistant untuk analisis SROI program CSR Indonesia. Berikan 3-5 referensi terpercaya (pemerintah, jurnal, laporan resmi) yang relevan. Format setiap referensi pada baris terpisah: JUDUL | TAHUN | URL | RELEVANSI_SINGKAT. Jangan tambahkan teks lain selain daftar referensi.' },
             { role: 'user', content: prompt }
           ]
         })
       });
       var data = await res.json();
-      if (data.error) { console.warn('Search error:', data.error.message); return; }
+      if (data.error) { console.warn('Search error:', data.error.message); return []; }
 
       var content = data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content || '';
-      if (!content) return;
+      if (!content) return [];
 
-      // Parse hasil dan simpan ke evidenceByNode + problem_context.references
-      var lines = content.split('\n').filter(function(l){ return l.includes('|'); });
-      var parsed = lines.map(function(line, idx) {
-        var parts = line.split('|').map(function(p){ return p.trim(); });
-        var refId = 'REF-AGT-' + targetNodeId.replace(/[^A-Z0-9]/gi,'-') + '-' + (idx+1);
-        return {
-          id: refId,
-          title: parts[0] || 'Referensi ' + (idx+1),
-          year: parts[1] || '',
-          url: parts[2] || '',
-          type: 'other',
-          relevance_note: parts[3] || '',
-          _source: 'agent_search'
-        };
-      }).filter(function(r){ return r.title && r.title.length > 3; });
+      // Parse hasil — handle berbagai format output GPT search
+      var lines = content.split('\n').filter(function(l){ return l.trim().length > 5; });
+      var parsed = [];
+      var idx = 0;
 
-      if (!parsed.length) return;
+      lines.forEach(function(line) {
+        // Bersihkan markdown
+        var clean = line.replace(/\*\*/g,'').replace(/^\d+\.\s*/,'').replace(/^[-•]\s*/,'').trim();
+        if (!clean) return;
 
-      // Simpan ke evidenceByNode (array of ref objects, bukan hanya id)
-      var nodeEvidence = agentState.evidenceByNode[targetNodeId] || [];
-      parsed.forEach(function(ref) {
-        if (!nodeEvidence.find(function(e){ return e.id === ref.id; })) {
-          nodeEvidence.push(ref);
+        var parts, title, year, url, note;
+
+        if (clean.includes('|')) {
+          // Format pipe-separated
+          parts = clean.split('|').map(function(p){ return p.trim(); });
+          title = parts[0] || '';
+          year  = parts[1] || '';
+          url   = parts[2] || '';
+          note  = parts[3] || '';
+        } else {
+          // Fallback: ambil seluruh baris sebagai judul
+          title = clean;
+          year  = '';
+          url   = '';
+          note  = '';
         }
-      });
-      agentState.evidenceByNode[targetNodeId] = nodeEvidence;
 
-      // Juga tambahkan ke problem_context.references (global registry)
+        // Ekstrak URL dari mana saja di baris kalau belum ketemu
+        if (!url || !url.startsWith('http')) {
+          var urlMatch = clean.match(/https?:\/\/[^\s|)>\]]+/);
+          if (urlMatch) url = urlMatch[0];
+        }
+
+        // Ekstrak tahun dari mana saja
+        if (!year) {
+          var yrMatch = clean.match(/\b(19|20)\d{2}\b/);
+          if (yrMatch) year = yrMatch[0];
+        }
+
+        // Bersihkan judul dari URL dan tahun yang nyasar
+        title = title.replace(/https?:\/\/[^\s]+/g,'').replace(/\b(19|20)\d{2}\b/,'').trim();
+        // Bersihkan URL dari trailing karakter
+        if (url) url = url.replace(/[.,;)\]>]+$/, '');
+
+        if (!title || title.length < 4) return;
+
+        var refId = 'REF-AGT-' + targetNodeId.replace(/[^A-Z0-9]/gi,'-').toUpperCase() + '-' + (++idx);
+        parsed.push({
+          id: refId,
+          title: title,
+          year: year,
+          url: url,
+          type: 'other',
+          relevance_note: note,
+          _source: 'agent_search',
+          _for_node: targetNodeId
+        });
+      });
+
+      if (!parsed.length) return [];
+
+      // Simpan ke evidenceByNode dan problem_context.references
+      agentState.evidenceByNode[targetNodeId] = parsed;
       var ont = agentState.draftOntology;
       if (ont && ont.problem_context) {
         if (!ont.problem_context.references) ont.problem_context.references = [];
@@ -6668,23 +6751,12 @@
         });
       }
 
-      // Re-render card yang bersangkutan dengan evidence baru
-      var card = document.getElementById('anc-' + targetNodeId);
-      if (card && ont) {
-        var allCols = ['problem_nodes','outcome_nodes','indicator_nodes','monetisation_pre_fix_nodes','impact_adjustment_nodes'];
-        allCols.forEach(function(col) {
-          var node = (ont[col]||[]).find(function(n){ return n && n.id === targetNodeId; });
-          if (node) {
-            // Simpan objek evidence langsung di node (bukan hanya ref_id)
-            node._agent_evidence_objects = nodeEvidence;
-            node._agent_evidence = nodeEvidence.map(function(r){ return r.id; });
-            agentRenderCard(targetNodeId, col, node, node._agent_reasoning, nodeEvidence);
-          }
-        });
-      }
+      console.log('[AGENT] search selesai untuk', targetNodeId, '→', parsed.length, 'referensi');
+      return parsed;
 
     } catch(err) {
       console.warn('agentSearchEvidence error:', err.message);
+      return [];
     }
   }
   async function agentCallGPT(userMessage, useWebSearch) {
@@ -6707,37 +6779,28 @@
 
     var systemPrompt = 'Kamu adalah Ontology Builder Agent untuk analisis SROI/TJSL program CSR Indonesia.\n\n' +
       'PERANMU:\n' +
-      'Membangun ontologi lengkap dari input minimal (judul + aktivitas program) melalui tool calls.\n' +
-      'Setiap node dibuat via create_node. Setiap relasi via link_nodes.\n\n' +
-      'PRINSIP KRITIS — JANGAN MENUNGGU HASIL SEARCH:\n' +
-      'search_evidence berjalan di BACKGROUND — hasilnya tidak dikembalikan ke kamu.\n' +
-      'Setelah memanggil search_evidence, LANGSUNG lanjut ke create_node berikutnya.\n' +
-      'JANGAN menunggu hasil search sebelum membuat node.\n' +
-      'Pola yang benar:\n' +
-      '  search_evidence(query="...", target_node_id="PROB-01.1") → create_node(PROB-01.1) → search_evidence(...PROB-01.2) → create_node(PROB-01.2) → dst\n\n' +
-      'URUTAN BUILD (Fase 1 — sampai checkpoint):\n' +
-      '1. Parse input → identifikasi judul + aktivitas\n' +
-      '2. Untuk setiap problem node yang akan dibuat:\n' +
-      '   a. search_evidence(query spesifik, target_node_id = ID node tsb)\n' +
-      '   b. LANGSUNG create_node untuk node tsb\n' +
-      '3. Buat outcome_nodes (tanpa search, kecuali diperintah)\n' +
-      '4. link_nodes untuk relasi problem→sub_problem, output_delivery→outcome\n' +
-      '5. checkpoint() — ringkas apa yang dibuat\n\n' +
+      'Membangun ontologi lengkap dari input minimal (judul + aktivitas program) melalui tool calls.\n\n' +
+      'ALUR WAJIB untuk setiap problem node:\n' +
+      '  search_evidence(query spesifik, target_node_id="PROB-XX.X")\n' +
+      '  → kamu MENERIMA daftar referensi dengan IDs\n' +
+      '  → create_node(node_id="PROB-XX.X", evidence_ids=[IDs dari hasil search])\n' +
+      'Ulangi untuk setiap sub-problem. Kemudian buat outcome_nodes. Kemudian checkpoint().\n\n' +
+      'ATURAN search_evidence:\n' +
+      '  - target_node_id = ID node SPESIFIK yang akan dibuat (PROB-01.1, PROB-01.2, bukan PROB-01 untuk semua)\n' +
+      '  - Setelah search, kamu MENERIMA hasilnya — gunakan reference IDs di evidence_ids saat create_node\n\n' +
+      'CARA MEMANGGIL create_node:\n' +
+      '  collection: "problem_nodes"\n' +
+      '  node_id: "PROB-01.1"     ← WAJIB, string eksplisit\n' +
+      '  label: "Judul node"      ← WAJIB\n' +
+      '  evidence_ids: ["REF-AGT-PROB-01-1-1", ...]  ← dari hasil search_evidence\n' +
+      '  extra_fields: { dimension:"economic", description:"...", problem_type:"capability_gap" }\n' +
+      '  reasoning: "Alasan"\n\n' +
       'ATURAN ID:\n' +
       '  problem_nodes: PROB-01, PROB-01.1, PROB-01.2\n' +
       '  outcome_nodes: OC-ECO-01, OC-SOC-01, OC-WB-01\n' +
       '  activity_nodes: ACT_YYYY\n' +
       '  indicator_nodes: IND-ECO-01\n' +
       '  monetisation: MON-XXX | adjustment: ADJ_XXX | final_value: FV_YYYY_MON_XXX\n\n' +
-      'CARA MEMANGGIL create_node:\n' +
-      '  collection: "problem_nodes"\n' +
-      '  node_id: "PROB-01.1"     ← WAJIB, string eksplisit\n' +
-      '  label: "Judul node"      ← WAJIB\n' +
-      '  extra_fields: { dimension:"economic", description:"...", problem_type:"capability_gap" }\n' +
-      '  reasoning: "Alasan"\n\n' +
-      'ATURAN search_evidence:\n' +
-      '  target_node_id = ID node yang spesifik (PROB-01.1, bukan PROB-01 untuk semua)\n' +
-      '  Setelah search → LANGSUNG buat node, jangan tunggu\n\n' +
       'SCHEMA:\n' + schema + ontCtx + '\n\n' +
       'Gunakan bahasa Indonesia. Respond dalam bahasa Indonesia.';
 
@@ -6798,8 +6861,8 @@
         // Log tool call ke chat
         agentAppendToolCall(tcName, tcArgs);
 
-        // Execute tool
-        var result = agentToolExecutor(tcName, tcArgs);
+        // Execute tool (async — search_evidence akan await hasil sebelum lanjut)
+        var result = await agentToolExecutor(tcName, tcArgs);
 
         toolResults.push({
           role: 'tool',
@@ -7512,9 +7575,21 @@
   async function agentContinueBuild() {
     var sendBtn = document.getElementById('agentSendBtn');
     if (sendBtn) { sendBtn.disabled = true; sendBtn.textContent = '...'; }
-    agentUpdateModeBar('building', 'Melanjutkan Build', 'Agent meneruskan...');
+    agentUpdateModeBar('building', 'Melanjutkan Build', 'Agent mengerjakan layer berikutnya...');
+
+    var ont = agentState.draftOntology;
+    var probIds = (ont && ont.problem_nodes || []).map(function(n){ return n.id; }).join(', ');
+    var ocIds   = (ont && ont.outcome_nodes  || []).map(function(n){ return n.id; }).join(', ');
+    var msg = 'Checkpoint disetujui. Lanjutkan build ontologi ke layer berikutnya.\n'
+      + 'Problem nodes sudah ada: ' + (probIds || '–') + '\n'
+      + 'Outcome nodes sudah ada: ' + (ocIds   || '–') + '\n'
+      + 'Lanjutkan dengan: activity_nodes, output_delivery_nodes, stakeholder_nodes, beneficiary_nodes, baseline_nodes, indicator_nodes, '
+      + 'monetisation_pre_fix_nodes (dengan search evidence), impact_adjustment_nodes (dengan search evidence), '
+      + 'final_value_nodes, compute_fva, run_qa.';
+
+    agentAppendBubble('user', '▶ Lanjutkan build');
     try {
-      await agentCallGPT('Lanjutkan build ontologi ke layer berikutnya.');
+      await agentCallGPT(msg);
     } catch(err) {
       agentAppendBubble('agent', '⚠ Error: ' + err.message);
     }
