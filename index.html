@@ -6242,60 +6242,154 @@
 
   // ── AGENT STATE ────────────────────────────────────────────────────────
   var agentState = {
-    active:   false,
-    mode:     'idle', // 'building' | 'reviewing' | 'propagating' | 'restructuring'
-    draftOntology: null,
-    opLog:    [],
-    pendingVerifications: [],
-    evidenceByNode: {},
-    lastImpact: null,
-    agentHistory: [],   // OpenAI messages format
-    buildProgress: {
-      layers_done: [],
-      current_layer: null,
-      blocking_on: null
-    },
-    inputContext: {
-      program_title:          '',
-      activities:             '',
-      years:                  null,
-      investment_by_year:     null,
-      raw_monetisation_input: null,
-      beneficiary_hint:       null,
-      location_hint:          null,
-      notes:                  null
-    },
-    activeFilter: 'all',  // untuk card workspace filter
-    _opCounter: 0
+    active: false,
+    mode:   'idle',
+
+    // ── Level 1: Program Master (persistent, relatif tetap) ──────────────
+    programMaster: null,
+    // { id, name, operator, program_induk }
+
+    // ── Level 2: Active Run pointer ──────────────────────────────────────
+    activeRunId: null,
+
+    // ── Level 3: Program Runs — satu entry per scenario build ────────────
+    programRuns: {},
+    /*
+      "PSN-2023-JAWA": {
+        programContext: { year, location, target_group, activities, objective },
+        draftOntology:  { ...ontologi... },
+        evidenceByNode: { "PROB-01.1": [{id,title,url,...}] },
+        buildProgress:  { layers_done, current_layer, blocking_on },
+        lastQAResult:   { flags, scores, needs_revision },
+        pendingVerifications: [],
+        opLog:          [],
+        lastImpact:     null
+      }
+    */
+
+    // ── Session state (tidak perlu persistent) ───────────────────────────
+    agentHistory: [],   // Orchestrator conversation history
+    activeFilter: 'all',
+    _opCounter:   0
   };
+
+  // ── HELPER ACCESSORS — semua agent pakai ini, bukan akses langsung ─────
+  function activeRun() {
+    if (!agentState.activeRunId) return null;
+    return agentState.programRuns[agentState.activeRunId] || null;
+  }
+  function activeCtx() {
+    var run = activeRun();
+    return run ? (run.programContext || null) : null;
+  }
+  function activeDraft() {
+    var run = activeRun();
+    return run ? (run.draftOntology || null) : null;
+  }
+  function activeEvidence() {
+    var run = activeRun();
+    return run ? (run.evidenceByNode || {}) : {};
+  }
+  function activeProgress() {
+    var run = activeRun();
+    return run ? (run.buildProgress || { layers_done:[], current_layer:null, blocking_on:null }) : null;
+  }
+
+  // Buat run baru dan set sebagai active
+  function createRun(runId, programContext, draftOntology) {
+    agentState.programRuns[runId] = {
+      programContext:       programContext || {},
+      draftOntology:        draftOntology  || AGENT_INTERFACE.newDraft(),
+      evidenceByNode:       {},
+      buildProgress:        { layers_done: [], current_layer: null, blocking_on: null },
+      lastQAResult:         { flags: [], scores: {}, needs_revision: false },
+      pendingVerifications: [],
+      opLog:                [],
+      lastImpact:           null
+    };
+    agentState.activeRunId = runId;
+    return agentState.programRuns[runId];
+  }
+
+  // Fingerprint untuk deteksi context berubah signifikan
+  function runFingerprint(ctx) {
+    if (!ctx) return '';
+    return [ctx.year, ctx.location, ctx.target_group].join('|').toLowerCase();
+  }
 
   // ── AGENT INTERFACE — jembatan ke sistem lama ─────────────────────────
   var AGENT_INTERFACE = {
-    getSchema:    function() { return emptyOntology(); },
-    newDraft:     function() {
+    getSchema: function() { return emptyOntology(); },
+    newDraft:  function() {
       var o = emptyOntology();
       o.ontology_meta.status = 'agent_draft';
       return o;
     },
-    commitToMain: function(ont) {
-      // Merge draft ke records[] via sistem lama
-      var clean = JSON.parse(JSON.stringify(ont));
-      // Strip _agent_status dari semua nodes
+
+    // Commit satu run ke records[] — per-run, tidak overwrite run lain
+    commitRunToStorage: function(runId) {
+      var run = agentState.programRuns[runId];
+      if (!run || !run.draftOntology) throw new Error('Run tidak ditemukan: ' + runId);
+
+      var ont = JSON.parse(JSON.stringify(run.draftOntology));
+      // Strip internal agent fields
       var cols = ['problem_nodes','activity_nodes','stakeholder_nodes',
         'beneficiary_nodes','output_delivery_nodes','baseline_nodes',
         'outcome_nodes','indicator_nodes','monetisation_pre_fix_nodes',
         'impact_adjustment_nodes','final_value_nodes'];
       cols.forEach(function(col) {
-        (clean[col]||[]).forEach(function(n) { if(n) { delete n._agent_status; delete n._agent_reasoning; delete n._agent_evidence; } });
+        (ont[col]||[]).forEach(function(n) {
+          if (n) {
+            delete n._agent_status; delete n._agent_reasoning;
+            delete n._agent_evidence; delete n._agent_evidence_objects;
+            delete n._mon_source_type; delete n._mon_paired_with;
+          }
+        });
       });
-      clean.ontology_meta.status = 'experimental_working_model';
-      document.getElementById('ontologyText').value = JSON.stringify(clean, null, 2);
-      var title = (clean.identity&&(clean.identity.sub_program||clean.identity.program)) || clean.ontology_meta.ontology_id || 'Draft Agent';
-      document.getElementById('recordTitle').value = title;
+      ont.ontology_meta.status = 'experimental_working_model';
+
+      // Buat record dengan run_id sebagai identifier unik
+      var ctx = run.programContext || {};
+      var master = agentState.programMaster || {};
+      var title  = [master.name, ctx.year, ctx.location].filter(Boolean).join(' — ') ||
+                   ont.ontology_meta.ontology_id || runId;
+
+      // Inject ke form lama untuk pakai saveOntology() existing
+      document.getElementById('ontologyText').value = JSON.stringify(ont, null, 2);
+      document.getElementById('recordTitle').value  = title;
+
+      // Tag record dengan run_id agar bisa diidentifikasi
+      // saveOntology() akan upsert ke records[] berdasarkan editingId
+      // Kita set editingId ke runId kalau sudah ada, biarkan null kalau baru
+      var existingRecord = records.find(function(r){ return r.run_id === runId; });
+      if (existingRecord) editingId = existingRecord.id;
+      else editingId = null;
+
       saveOntology();
+
+      // Patch record yang baru saja disimpan dengan run metadata
+      var saved = records.find(function(r){ return r.run_id === runId || r.title === title; });
+      if (saved) {
+        saved.run_id      = runId;
+        saved.program_id  = master.id || '';
+        saved.year        = ctx.year || null;
+        saved.location    = ctx.location || '';
+        saved.status      = 'committed';
+        saved.qa_result   = run.lastQAResult || null;
+        saved.updated_at  = new Date().toISOString();
+        persist();
+      }
     },
+
+    // Legacy wrapper — pakai activeRunId
+    commitToMain: function(ont) {
+      // Fallback kalau ada kode lama yang masih panggil ini
+      if (agentState.activeRunId) {
+        AGENT_INTERFACE.commitRunToStorage(agentState.activeRunId);
+      }
+    },
+
     getGPTKey: function() {
-      // Ambil dari field OpenAI yang sudah ada
       return (document.getElementById('nlpKeyOpenai') && document.getElementById('nlpKeyOpenai').value) ||
              (document.getElementById('nlpApiKeyInput') && document.getElementById('nlpApiKeyInput').value) || '';
     }
@@ -6480,7 +6574,7 @@
 
   // ── AGENT TOOL EXECUTOR ───────────────────────────────────────────────
   async function agentToolExecutor(toolName, args) {
-    var ont = agentState.draftOntology;
+    var ont = activeDraft();
     if (!ont) return { error: 'Draft ontologi belum diinisialisasi' };
 
     agentState._opCounter++;
@@ -6521,10 +6615,10 @@
         console.log('[AGENT] create_node:', data.id, 'di', col, '| label:', data.label, '| evidence_ids:', args.evidence_ids||[]);
         ont[col].push(data);
 
-        var nodeEvidObjs = agentState.evidenceByNode[data.id] || [];
+        var nodeEvidObjs = activeRun().evidenceByNode[data.id] || [];
         if (nodeEvidObjs.length) data._agent_evidence_objects = nodeEvidObjs;
 
-        agentState.opLog.push({ id: opId, tool: 'create_node', collection: col, node_id: data.id, reasoning: args.reasoning });
+        activeRun().opLog.push({ id: opId, tool: 'create_node', collection: col, node_id: data.id, reasoning: args.reasoning });
         agentRenderCard(data.id, col, data, args.reasoning, nodeEvidObjs.length ? nodeEvidObjs : (args.evidence_ids || []));
         return { success: true, node_id: data.id, collection: col };
       }
@@ -6539,12 +6633,12 @@
         toIds.forEach(function(tid) {
           if (ri[rkey][args.from_id].indexOf(tid) === -1) ri[rkey][args.from_id].push(tid);
         });
-        agentState.opLog.push({ id: opId, tool: 'link_nodes', relation_key: rkey, from_id: args.from_id, to_ids: toIds });
+        activeRun().opLog.push({ id: opId, tool: 'link_nodes', relation_key: rkey, from_id: args.from_id, to_ids: toIds });
         return { success: true };
       }
 
       case 'search_batch_problems': {
-        agentState.opLog.push({ id: opId, tool: 'search_batch_problems', context: args.program_context });
+        activeRun().opLog.push({ id: opId, tool: 'search_batch_problems', context: args.program_context });
         console.log('[AGENT] search_batch_problems → nodes:', args.problem_ids);
         var pResults = await agentSearchBatch(
           args.program_context,
@@ -6565,7 +6659,7 @@
       }
 
       case 'search_batch_proxies': {
-        agentState.opLog.push({ id: opId, tool: 'search_batch_proxies', aspects: args.proxy_aspects });
+        activeRun().opLog.push({ id: opId, tool: 'search_batch_proxies', aspects: args.proxy_aspects });
         console.log('[AGENT] search_batch_proxies → aspects:', args.proxy_aspects);
         var prxQuery = 'Cari referensi proxy value untuk aspek monetisasi berikut dalam konteks program CSR Indonesia:\n'
           + (args.proxy_aspects||[]).join(', ');
@@ -6588,7 +6682,7 @@
       }
 
       case 'search_batch_ddat': {
-        agentState.opLog.push({ id: opId, tool: 'search_batch_ddat', context: args.program_context });
+        activeRun().opLog.push({ id: opId, tool: 'search_batch_ddat', context: args.program_context });
         console.log('[AGENT] search_batch_ddat → factors:', args.factors_needed);
         var ddatQuery = 'Cari 1 referensi empiris untuk masing-masing faktor DDAT berikut dalam program CSR Indonesia:\n'
           + (args.factors_needed||[]).join(', ')
@@ -6613,7 +6707,7 @@
 
       // Legacy: search_evidence tunggal — masih bisa dipanggil untuk refinement
       case 'search_evidence': {
-        agentState.opLog.push({ id: opId, tool: 'search_evidence', query: args.query, target: args.target_node_id });
+        activeRun().opLog.push({ id: opId, tool: 'search_evidence', query: args.query, target: args.target_node_id });
         console.log('[AGENT] search_evidence (refinement) → target:', args.target_node_id);
         var srResults = await agentSearchEvidence(args.query, args.target_node_id, args.purpose);
         var srSummary = srResults.map(function(r,i){
@@ -6637,11 +6731,11 @@
           blocking: args.blocking || false,
           status: 'pending'
         };
-        agentState.pendingVerifications.push(ver);
+        activeRun().pendingVerifications.push(ver);
         // Update card status ke 'flagged'
         agentUpdateCardStatus(args.node_id, 'flagged', ver);
-        agentState.opLog.push({ id: opId, tool: 'flag_for_verification', node_id: args.node_id, type: args.type });
-        if (args.blocking) agentState.buildProgress.blocking_on = args.node_id;
+        activeRun().opLog.push({ id: opId, tool: 'flag_for_verification', node_id: args.node_id, type: args.type });
+        if (args.blocking) activeProgress().blocking_on = args.node_id;
         return { success: true, verification_id: ver.id };
       }
 
@@ -6652,7 +6746,7 @@
         if (!target) return { error: 'Node ' + args.node_id + ' tidak ditemukan di ' + ucol };
         Object.assign(target, args.patch);
         if (args.reasoning) target._agent_reasoning = args.reasoning;
-        agentState.opLog.push({ id: opId, tool: 'update_node', node_id: args.node_id, patch: args.patch });
+        activeRun().opLog.push({ id: opId, tool: 'update_node', node_id: args.node_id, patch: args.patch });
         // Re-render card
         agentRenderCard(args.node_id, ucol, target, target._agent_reasoning, target._agent_evidence || []);
         return { success: true };
@@ -6680,33 +6774,33 @@
           }
         });
         ont.final_value_aggregates = fvaArr;
-        agentState.opLog.push({ id: opId, tool: 'compute_fva', years: years });
+        activeRun().opLog.push({ id: opId, tool: 'compute_fva', years: years });
         agentUpdateCommitBar();
         return { success: true, fva: fvaArr };
       }
 
       case 'assess_impact': {
         var impact = agentAssessImpact(args.changed_node_id, args.change_type, args.change_detail || {});
-        agentState.lastImpact = impact;
-        agentState.opLog.push({ id: opId, tool: 'assess_impact', node_id: args.changed_node_id, level: impact.level });
+        activeRun().lastImpact = impact;
+        activeRun().opLog.push({ id: opId, tool: 'assess_impact', node_id: args.changed_node_id, level: impact.level });
         return impact;
       }
 
       case 'run_qa': {
         var flags = agentRunQALogic(args.scope || 'full');
-        agentState.opLog.push({ id: opId, tool: 'run_qa', scope: args.scope, flag_count: flags.length });
+        activeRun().opLog.push({ id: opId, tool: 'run_qa', scope: args.scope, flag_count: flags.length });
         agentRenderQAFlags(flags);
         return { success: true, flags: flags };
       }
 
       case 'checkpoint': {
-        agentState.buildProgress.layers_done.push('problem', 'outcome');
+        activeProgress().layers_done.push('problem', 'outcome');
         agentState.mode = 'reviewing';
         agentUpdateModeBar('reviewing', 'Checkpoint — Review Draft Awal', args.summary || '');
-        agentState.opLog.push({ id: opId, tool: 'checkpoint', summary: args.summary });
+        activeRun().opLog.push({ id: opId, tool: 'checkpoint', summary: args.summary });
 
         // Hitung ringkasan nodes yang sudah dibuat
-        var ont = agentState.draftOntology;
+        var ont = activeDraft();
         var probCount = (ont && ont.problem_nodes || []).length;
         var ocCount   = (ont && ont.outcome_nodes  || []).length;
 
@@ -6781,7 +6875,7 @@
           }
         }
 
-        agentState.opLog.push({ id: opId, tool: 'delete_node', node_id: delId, reasoning: args.reasoning });
+        activeRun().opLog.push({ id: opId, tool: 'delete_node', node_id: delId, reasoning: args.reasoning });
         agentUpdateCommitBar();
 
         // Lapor impact ke chat
@@ -6910,12 +7004,12 @@
 
         // Simpan ke evidenceByNode dan global refs
         if (targetNode) {
-          agentState.evidenceByNode[targetNode] = agentState.evidenceByNode[targetNode] || [];
-          if (!agentState.evidenceByNode[targetNode].find(function(e){ return e.id===ref.id; })) {
-            agentState.evidenceByNode[targetNode].push(ref);
+          activeRun().evidenceByNode[targetNode] = activeRun().evidenceByNode[targetNode] || [];
+          if (!activeRun().evidenceByNode[targetNode].find(function(e){ return e.id===ref.id; })) {
+            activeRun().evidenceByNode[targetNode].push(ref);
           }
         }
-        var ont = agentState.draftOntology;
+        var ont = activeDraft();
         if (ont && ont.problem_context) {
           if (!ont.problem_context.references) ont.problem_context.references = [];
           if (!ont.problem_context.references.find(function(r){ return r.id===ref.id; })) {
@@ -7037,8 +7131,8 @@
       if (!parsed.length) return [];
 
       // Simpan ke evidenceByNode dan problem_context.references
-      agentState.evidenceByNode[targetNodeId] = parsed;
-      var ont = agentState.draftOntology;
+      activeRun().evidenceByNode[targetNodeId] = parsed;
+      var ont = activeDraft();
       if (ont && ont.problem_context) {
         if (!ont.problem_context.references) ont.problem_context.references = [];
         parsed.forEach(function(ref) {
@@ -7093,57 +7187,61 @@
 
   // Query generator — formula: [claim-driven core] + [context] + [verification intent]
   // Meniru gaya reasoning: claim → problem context → verification intent
-  async function _generateEvidenceQuery(rawQuery, purpose, nodeIds) {
+  async function _generateEvidenceQuery(rawQuery, purpose, nodeIds, programContext) {
+    var ctx = programContext || activeCtx() || {};
     var purposeInstructions = {
       'problem_framing':
         'Kamu membantu researcher SROI memvalidasi bahwa masalah sosial-ekonomi benar-benar ada di lapangan.\n' +
-        'Ubah input menjadi query pencarian dengan formula:\n' +
-        '  "evidence that [claim masalah spesifik] affects [kelompok sasaran] in Indonesia"\n' +
-        'atau alternatif:\n' +
-        '  "empirical evidence [masalah] [kelompok] Indonesia"\n' +
-        '  "BPS report [masalah] Indonesia"\n' +
-        'Fokus pada: statistik kuat, angka konkret, hook naratif yang siap dikutip.\n' +
-        'Prioritas sumber: BPS, jurnal empiris Indonesia, laporan pemerintah, studi kasus lapangan.\n' +
-        'JANGAN gunakan label abstrak seperti "peer-reviewed empirical study".\n' +
-        'Mulai dari KLAIM masalah yang spesifik, bukan dari kategori akademik.',
+        'Formula: "evidence that [klaim masalah spesifik] affects [kelompok sasaran] in [lokasi]"\n' +
+        'atau: "empirical evidence [masalah] [kelompok] Indonesia"\n' +
+        'atau: "BPS report [masalah] Indonesia"\n' +
+        'Fokus: statistik kuat, angka konkret, hero stats yang siap dikutip.\n' +
+        'Sumber prioritas: BPS, jurnal empiris Indonesia, laporan pemerintah, studi kasus lapangan.\n' +
+        'JANGAN gunakan label abstrak seperti "peer-reviewed empirical study".',
 
       'proxy_basis':
-        'Kamu mencari dasar numerik untuk monetisasi manfaat program (proxy value).\n' +
-        'Ubah input menjadi query dengan formula:\n' +
-        '  "average [variabel ekonomi spesifik] for [kelompok sasaran] in Indonesia"\n' +
-        'Contoh yang benar:\n' +
-        '  "average maintenance cost boat engine fishermen Indonesia"\n' +
-        '  "average monthly income increase MSME assistance Indonesia"\n' +
-        'Fokus pada: angka rata-rata, statistik resmi, data yang bisa dijadikan proxy SROI.\n' +
-        'Prioritas: BPS, Kementerian, laporan lembaga resmi, jurnal dengan data lapangan.',
+        'Kamu mencari dasar numerik untuk monetisasi manfaat (proxy value SROI).\n' +
+        'Formula: "average [variabel ekonomi spesifik] for [kelompok sasaran] in Indonesia"\n' +
+        'Fokus: angka rata-rata, statistik resmi, data yang bisa dijadikan proxy.\n' +
+        'Sumber prioritas: BPS, Kementerian, laporan lembaga resmi, jurnal dengan data lapangan.',
 
       'ddat_justification':
-        'Kamu mencari justifikasi empiris untuk faktor DDAT (Deadweight, Displacement, Attribution, Drop-off).\n' +
-        'Ubah input menjadi query dengan formula:\n' +
-        '  "external factors affecting [outcome spesifik] in [konteks program] Indonesia"\n' +
-        'Contoh yang benar:\n' +
-        '  "external factors affecting employment outcomes vocational training Indonesia"\n' +
-        '  "sustainability decline after training program case study Indonesia"\n' +
-        'JANGAN cari frasa metodologis abstrak.\n' +
-        'Cari faktor kontekstual nyata yang mempengaruhi asumsi DDAT.',
+        'Kamu mencari justifikasi empiris untuk faktor DDAT.\n' +
+        'Formula: "external factors affecting [outcome spesifik] in [konteks program] Indonesia"\n' +
+        'JANGAN cari frasa metodologis abstrak — cari faktor kontekstual nyata.',
 
       'revision':
-        'Cari referensi tambahan untuk memperkuat atau memperbarui node yang sudah ada.\n' +
+        'Cari referensi tambahan untuk memperkuat node yang sudah ada.\n' +
         'Formula: "empirical evidence [klaim spesifik] [kelompok] Indonesia"\n' +
         'Prioritas: sumber terbaru, data terkini, jurnal dengan angka konkret.'
     };
 
     var instruction = purposeInstructions[purpose] || purposeInstructions['problem_framing'];
+
+    // Inject program context ke prompt
+    var ctxStr = '';
+    if (ctx.name || ctx.target_group) {
+      ctxStr = '\nPROGRAM CONTEXT:\n' +
+        '- Program: ' + (ctx.name || '') + '\n' +
+        '- Target group: ' + (ctx.target_group || '') + '\n' +
+        '- Location: ' + (ctx.location || 'Indonesia') + '\n' +
+        '- Year: ' + (ctx.year || '') + '\n' +
+        '- Activities: ' + (Array.isArray(ctx.activities) ? ctx.activities.join(', ') : (ctx.activities||'')) + '\n';
+    }
+
     var nodeCtx = nodeIds && nodeIds.length
-      ? '\nNode yang perlu di-cover: ' + nodeIds.join(', ')
+      ? '\nNode yang perlu di-cover (buat satu query per node):\n' +
+        nodeIds.map(function(id){ return '- ' + id; }).join('\n')
       : '';
 
     var msg = await _gptCall(
       'Kamu adalah query generator untuk Evidence Agent SROI Indonesia.\n' +
       instruction + '\n\n' +
-      'OUTPUT: Hanya tulis query pencarian final dalam bahasa Inggris. Satu baris per node jika ada beberapa node. Tidak ada penjelasan.',
-      [{ role: 'user', content: 'Input node/masalah: ' + rawQuery + nodeCtx }],
-      null, null, 300
+      'OUTPUT FORMAT:\n' +
+      '[NODE_ID] → [query bahasa Inggris]\n' +
+      'Satu baris per node. Tidak ada penjelasan, tidak ada preamble.',
+      [{ role: 'user', content: 'Input: ' + rawQuery + ctxStr + nodeCtx }],
+      null, null, 400
     );
     return msg && msg.content ? msg.content.trim() : rawQuery;
   }
@@ -7151,46 +7249,67 @@
   async function runEvidenceAgent(task) {
     agentLog('evidence', 'start', task.query);
 
-    var nodeIds = task.node_ids || [];
-    var maxPerNode = task.max_per_node || 3;
+    var nodeIds      = task.node_ids || [];
+    var maxPerNode   = task.max_per_node || 3;
+    var programCtx   = task.program_context || activeCtx() || {};  // ← dari task atau fallback ke activeCtx
 
-    // Generate query yang lebih baik via GPT sebelum search
-    var enrichedQuery = await _generateEvidenceQuery(
+    // Generate query spesifik via GPT
+    var rawQueryLines = await _generateEvidenceQuery(
       task.query,
       task.type || 'problem_framing',
-      nodeIds
+      nodeIds,
+      programCtx
     );
-    agentLog('evidence', 'query', enrichedQuery.slice(0, 80));
+    agentLog('evidence', 'query', rawQueryLines.slice(0, 100));
     var allResults = [];
 
     if (nodeIds.length <= 1) {
-      // Single node atau tanpa node — satu call cukup
-      allResults = await agentSearchBatch(enrichedQuery, nodeIds, task.type || 'problem_framing', maxPerNode);
+      allResults = await agentSearchBatch(rawQueryLines, nodeIds, task.type || 'problem_framing', maxPerNode);
     } else {
-      // Multiple nodes — satu call batch dengan query yang menyebut semua nodes
-      var batchQuery = enrichedQuery + '\nBuat referensi untuk setiap masalah: ' + nodeIds.join(', ');
-      allResults = await agentSearchBatch(batchQuery, nodeIds, task.type || 'problem_framing', maxPerNode);
+      // Multi-node: query generator sudah buat satu baris per node
+      // Parse per baris dan jalankan batch dengan semua queries sekaligus
+      var lines = rawQueryLines.split('\n').filter(function(l){ return l.trim().length > 5; });
+      var nodeQueryMap = {};
+      lines.forEach(function(line) {
+        var match = line.match(/^(PROB-[\d.]+|OC-[A-Z]+-\d+|MON-\S+|ADJ-\S+|IND-\S+)\s*[→:]\s*(.+)/);
+        if (match) nodeQueryMap[match[1]] = match[2].trim();
+      });
 
-      // Coverage check: node mana yang masih kosong?
+      // Kalau berhasil parse per-node, jalankan per node
+      var mappedNodeIds = Object.keys(nodeQueryMap);
+      if (mappedNodeIds.length > 0) {
+        for (var ni = 0; ni < mappedNodeIds.length; ni++) {
+          var nid = mappedNodeIds[ni];
+          var nQuery = nodeQueryMap[nid];
+          var nResults = await agentSearchBatch(nQuery, [nid], task.type || 'problem_framing', maxPerNode);
+          allResults = allResults.concat(nResults);
+        }
+        // Node yang tidak ter-map → pakai query batch umum
+        var unmapped = nodeIds.filter(function(id){ return !nodeQueryMap[id]; });
+        if (unmapped.length) {
+          var fallback = await agentSearchBatch(rawQueryLines, unmapped, task.type || 'problem_framing', maxPerNode);
+          allResults = allResults.concat(fallback);
+        }
+      } else {
+        // Fallback: satu batch untuk semua
+        allResults = await agentSearchBatch(rawQueryLines, nodeIds, task.type || 'problem_framing', maxPerNode);
+      }
+
+      // Coverage check
       var coveredNodes = {};
       allResults.forEach(function(r){ if (r._for_node) coveredNodes[r._for_node] = true; });
       var uncoveredNodes = nodeIds.filter(function(nid){ return !coveredNodes[nid]; });
-
-      // Kalau ada node yang tidak ter-cover, assign distribusi merata dari hasil yang ada
       if (uncoveredNodes.length && allResults.length) {
         uncoveredNodes.forEach(function(nid, ni) {
-          // Ambil ref yang paling relevan dari pool, assign ke node yang belum punya
-          var unassigned = allResults.filter(function(r){ return !r._assigned_extra; });
-          var pick = unassigned[ni % unassigned.length];
+          var pick = allResults[ni % allResults.length];
           if (pick) {
             var extraRef = Object.assign({}, pick);
             extraRef.id = 'REF-AGT-' + nid.replace(/[^A-Z0-9]/gi,'-').toUpperCase() + '-X' + (ni+1);
             extraRef._for_node = nid;
             extraRef._assigned_extra = true;
             allResults.push(extraRef);
-            // Simpan ke evidenceByNode
-            agentState.evidenceByNode[nid] = agentState.evidenceByNode[nid] || [];
-            agentState.evidenceByNode[nid].push(extraRef);
+            activeRun().evidenceByNode[nid] = activeRun().evidenceByNode[nid] || [];
+            activeRun().evidenceByNode[nid].push(extraRef);
           }
         });
         agentLog('evidence', 'coverage-fix', uncoveredNodes.join(',') + ' assigned from pool');
@@ -7346,7 +7465,7 @@
     var jsFlags = agentRunQALogic(task.scope || 'full');
 
     // Tambahkan QA berbasis GPT untuk logic check yang lebih dalam
-    var ont = agentState.draftOntology;
+    var ont = activeDraft();
     var probNodes = (ont && ont.problem_nodes || []).map(function(n) {
       return { id: n.id, label: n.label, evidence_count: (n._agent_evidence||[]).length };
     });
@@ -7409,7 +7528,59 @@
     return { flags: allFlags, scores: scores, needs_revision: needsRevision, summary: summary };
   }
 
-  // ── AGENT 1: ORCHESTRATOR ────────────────────────────────────────────
+  // ── _extractProgramContext ────────────────────────────────────────────
+  // Dipanggil oleh Orchestrator saat: build scenario baru, atau fingerprint berubah.
+  // Return: { master, runId, programContext }
+  async function _extractProgramContext(userMessage) {
+    var msg = await _gptCall(
+      'Kamu adalah program context extractor untuk sistem SROI/TJSL Indonesia.\n\n' +
+      'Dari input user, ekstrak informasi program dan hasilkan JSON:\n' +
+      '{\n' +
+      '  "master": {\n' +
+      '    "id": "kode singkat program misal PSN",\n' +
+      '    "name": "nama lengkap program",\n' +
+      '    "operator": "nama perusahaan/lembaga",\n' +
+      '    "program_induk": "program payung jika ada"\n' +
+      '  },\n' +
+      '  "run": {\n' +
+      '    "year": 2024,\n' +
+      '    "location": "lokasi spesifik",\n' +
+      '    "target_group": "kelompok sasaran spesifik",\n' +
+      '    "activities": ["aktivitas 1", "aktivitas 2"],\n' +
+      '    "objective": "tujuan utama program ini"\n' +
+      '  }\n' +
+      '}\n\n' +
+      'Kalau tahun tidak disebutkan, gunakan tahun sekarang.\n' +
+      'Kalau lokasi tidak disebutkan, gunakan "Indonesia".\n' +
+      'OUTPUT: JSON saja, tanpa teks lain.',
+      [{ role: 'user', content: userMessage }],
+      null, null, 600
+    );
+
+    var ctx = { master: {}, run: {} };
+    try {
+      var cleaned = (msg && msg.content || '').replace(/^```json\s*/,'').replace(/```\s*$/,'').trim();
+      ctx = JSON.parse(cleaned);
+    } catch(e) {
+      console.warn('[ORCHESTRATOR] Gagal parse program context:', e.message);
+    }
+
+    // Generate runId dari master.id + year + location
+    var masterId = (ctx.master && ctx.master.id || 'PRG').toUpperCase().replace(/[^A-Z0-9]/g,'-');
+    var year     = (ctx.run && ctx.run.year) || new Date().getFullYear();
+    var loc      = (ctx.run && ctx.run.location || 'ID').toUpperCase()
+                    .replace(/[^A-Z0-9]/g,'-').slice(0,10);
+    var runId    = masterId + '-' + year + '-' + loc;
+
+    return { master: ctx.master || {}, runId: runId, programContext: ctx.run || {} };
+  }
+
+  // Deteksi apakah program context berubah signifikan (butuh run baru)
+  function _contextChangedSignificantly(newCtx) {
+    var cur = activeCtx();
+    if (!cur) return true;
+    return runFingerprint(newCtx) !== runFingerprint(cur);
+  }
   // Satu-satunya yang punya state penuh (agentState.agentHistory).
   // Memutuskan: agent mana, kapan, berapa iterasi.
   // Tidak menulis nodes langsung — semua lewat Mapper.
@@ -7420,17 +7591,57 @@
     agentLog('orchestrator', 'start', userMessage.slice(0, 60));
     agentUpdateModeBar('building', 'Orchestrator', 'Menganalisis...');
 
-    // Shortcut: __SYSTEM__ messages langsung dieksekusi tanpa planning
+    // ── Step A: Extract / update program context ──────────────────────
+    // Dipanggil saat: tidak ada run aktif, atau fingerprint berubah signifikan
+    var isFirstMessage = !agentState.activeRunId ||
+      agentState.programRuns[agentState.activeRunId] &&
+      !agentState.programRuns[agentState.activeRunId].programContext;
+
+    if (isFirstMessage && !userMessage.startsWith('__SYSTEM__:')) {
+      agentLog('orchestrator', 'extract-context', 'Mengekstrak program context...');
+      var extracted = await _extractProgramContext(userMessage);
+
+      // Set program master (kalau belum ada atau berbeda)
+      if (!agentState.programMaster || agentState.programMaster.id !== (extracted.master.id||'')) {
+        agentState.programMaster = extracted.master;
+      }
+
+      // Cek apakah perlu run baru
+      var needsNewRun = !agentState.activeRunId ||
+        !agentState.programRuns[extracted.runId] ||
+        _contextChangedSignificantly(extracted.programContext);
+
+      if (needsNewRun) {
+        // Buat run baru dengan context yang sudah diekstrak
+        var existingDraft = activeDraft(); // simpan draft lama kalau ada
+        createRun(extracted.runId, extracted.programContext,
+          existingDraft || AGENT_INTERFACE.newDraft());
+        agentLog('orchestrator', 'new-run', extracted.runId);
+        agentAppendBubble('agent',
+          '📁 Run baru: <strong>' + extracted.runId + '</strong><br>' +
+          (extracted.programContext.target_group || '') + ' · ' +
+          (extracted.programContext.location || '') + ' · ' +
+          (extracted.programContext.year || ''));
+      } else {
+        // Update context saja, jangan reset run
+        agentState.programRuns[extracted.runId].programContext = extracted.programContext;
+        agentState.activeRunId = extracted.runId;
+      }
+    }
+
+    // ── Shortcut: __SYSTEM__ messages langsung eksekusi tanpa planning ─
     if (userMessage.startsWith('__SYSTEM__:')) {
       var sysMsg = userMessage.replace('__SYSTEM__:', '').trim();
       var isBuildPhase2 = sysMsg.includes('build_phase2');
-      var ont2 = agentState.draftOntology;
+      var ont2 = activeDraft();
       if (isBuildPhase2 && ont2) {
         agentUpdateModeBar('building', '🗂 Mapper Agent', 'Build fase 2...');
-        var mapResult2 = await runMapperAgent({
+        var ctx2 = activeCtx() || {};
+        await runMapperAgent({
           type: 'build_phase2',
           instruction: sysMsg,
           evidence_packets: [],
+          program_context: ctx2,
           existing_nodes: {
             problem_ids: (ont2.problem_nodes||[]).map(function(n){return n.id;}),
             outcome_ids:  (ont2.outcome_nodes||[]).map(function(n){return n.id;})
@@ -7442,23 +7653,37 @@
       }
     }
 
-    // Bangun context untuk Orchestrator
-    var ont = agentState.draftOntology;
+    // ── Bangun context untuk planning ────────────────────────────────
+    var ont       = activeDraft();
+    var ctx       = activeCtx() || {};
+    var progress  = activeProgress() || { layers_done: [] };
+
     var ontSummary = ont ? JSON.stringify({
-      problem_count:      (ont.problem_nodes||[]).length,
-      outcome_count:      (ont.outcome_nodes||[]).length,
-      activity_count:     (ont.activity_nodes||[]).length,
-      indicator_count:    (ont.indicator_nodes||[]).length,
-      mon_count:          (ont.monetisation_pre_fix_nodes||[]).length,
-      adj_count:          (ont.impact_adjustment_nodes||[]).length,
-      fva_years:          (ont.final_value_aggregates||[]).map(function(f){return f&&f.year;}),
-      layers_done:        agentState.buildProgress.layers_done,
-      problem_ids:        (ont.problem_nodes||[]).map(function(n){return n.id;}),
-      outcome_ids:        (ont.outcome_nodes||[]).map(function(n){return n.id;})
+      problem_count:  (ont.problem_nodes||[]).length,
+      outcome_count:  (ont.outcome_nodes||[]).length,
+      activity_count: (ont.activity_nodes||[]).length,
+      indicator_count:(ont.indicator_nodes||[]).length,
+      mon_count:      (ont.monetisation_pre_fix_nodes||[]).length,
+      adj_count:      (ont.impact_adjustment_nodes||[]).length,
+      fva_years:      (ont.final_value_aggregates||[]).map(function(f){return f&&f.year;}),
+      layers_done:    progress.layers_done,
+      problem_ids:    (ont.problem_nodes||[]).map(function(n){return n.id;}),
+      outcome_ids:    (ont.outcome_nodes||[]).map(function(n){return n.id;})
     }) : 'null';
 
+    // Program context untuk injeksi ke steps
+    var programCtxStr = JSON.stringify({
+      name:         agentState.programMaster && agentState.programMaster.name || ctx.name || '',
+      target_group: ctx.target_group || '',
+      activities:   ctx.activities || [],
+      location:     ctx.location || '',
+      year:         ctx.year || '',
+      objective:    ctx.objective || ''
+    });
+
     var orchSystemPrompt = 'Kamu adalah Orchestrator Agent untuk sistem SROI/TJSL.\n\n' +
-      'PERANMU: Memutuskan urutan kerja dan membuat plan detail, bukan menulis konten.\n' +
+      'PROGRAM CONTEXT (sudah diekstrak, gunakan untuk planning):\n' + programCtxStr + '\n\n' +
+      'PERANMU: Memutuskan urutan kerja dan membuat plan detail — bukan menulis konten.\n' +
       'Kamu mengkoordinasi: Evidence Agent, Mapper Agent, QA Agent.\n\n' +
       'OUTPUT: JSON plan. Format WAJIB:\n' +
       '{\n' +
@@ -7468,7 +7693,7 @@
       '      "agent": "evidence",\n' +
       '      "task": {\n' +
       '        "type": "problem_framing",\n' +
-      '        "query": "query spesifik tentang masalah program ini",\n' +
+      '        "query": "query dalam bahasa Inggris — spesifik untuk masalah program ini",\n' +
       '        "node_ids": ["PROB-01","PROB-01.1","PROB-01.2","PROB-01.3"],\n' +
       '        "max_per_node": 3\n' +
       '      }\n' +
@@ -7477,14 +7702,7 @@
       '      "agent": "mapper",\n' +
       '      "task": {\n' +
       '        "type": "build_phase1",\n' +
-      '        "instruction": "Buat nodes berikut:\\n' +
-      'PROB-01 (root problem, parent_id:null, sub_problems:[PROB-01.1,PROB-01.2,PROB-01.3])\\n' +
-      'PROB-01.1 (sub-problem 1, parent_id:PROB-01)\\n' +
-      'PROB-01.2 (sub-problem 2, parent_id:PROB-01)\\n' +
-      'PROB-01.3 (sub-problem 3, parent_id:PROB-01)\\n' +
-      'OC-ECO-01 (outcome ekonomi)\\n' +
-      'OC-SOC-01 (outcome sosial)\\n' +
-      'Gunakan evidence_ids dari evidence yang tersedia. Link nodes. Panggil checkpoint().",\n' +
+      '        "instruction": "Buat nodes:\\nPROB-01 (root)\\nPROB-01.1 (sub, parent:PROB-01, label spesifik)\\nPROB-01.2 (sub)\\nPROB-01.3 (sub)\\nOC-ECO-01\\nOC-SOC-01\\nLink. Checkpoint.",\n' +
       '        "planned_nodes": {\n' +
       '          "problem_ids": ["PROB-01","PROB-01.1","PROB-01.2","PROB-01.3"],\n' +
       '          "outcome_ids": ["OC-ECO-01","OC-SOC-01"]\n' +
@@ -7495,19 +7713,20 @@
       '  "reply_to_user": "pesan singkat bahasa Indonesia"\n' +
       '}\n\n' +
       'ATURAN PLAN:\n' +
-      '1. SELALU tentukan node_ids eksplisit di evidence task — minimal 1 root + 3 sub-problems\n' +
-      '2. SELALU sertakan planned_nodes di mapper task dengan list ID lengkap\n' +
-      '3. Mapper instruction WAJIB menyebutkan setiap node yang harus dibuat dengan ID-nya\n' +
-      '4. Sub-problems: identifikasi 3-4 masalah spesifik dari konteks program\n' +
-      '5. Outcomes: minimal 2 (ekonomi + sosial)\n\n' +
+      '1. Query Evidence Agent HARUS dalam bahasa Inggris dan spesifik ke program context di atas\n' +
+      '2. node_ids eksplisit di evidence task — minimal PROB-01 + 3 sub-problems\n' +
+      '3. planned_nodes di mapper task dengan list ID lengkap\n' +
+      '4. Mapper instruction menyebutkan setiap node + label spesifik sesuai program\n' +
+      '5. Sub-problems: 3-4 masalah spesifik sesuai target_group dan activities\n' +
+      '6. Outcomes: minimal 2 (ekonomi + sosial)\n\n' +
       'INTENT MAPPING:\n' +
       '- Input program baru → build_phase1\n' +
-      '- User ganti label/deskripsi → revision_minor (mapper saja, tanpa evidence)\n' +
+      '- User ganti label/deskripsi → revision_minor (mapper saja)\n' +
       '- User ganti substansi node → revision_medium (evidence + mapper + qa)\n' +
-      '- User hapus/tambah node kritis → revision_major (qa dulu + evidence + mapper + qa)\n' +
+      '- User hapus/tambah node kritis → revision_major (qa + evidence + mapper + qa)\n' +
       '- User minta cek → qa_only\n' +
-      '- User ngobrol/tanya → user_question (steps kosong [])\n\n' +
-      'ATURAN EVIDENCE (max token):\n' +
+      '- User ngobrol/tanya → user_question (steps: [])\n\n' +
+      'ATURAN EVIDENCE:\n' +
       '- problem_framing: max 3 ref/node\n' +
       '- proxy_basis: max 2 ref/proxy\n' +
       '- ddat_justification: max 1 ref/faktor\n\n' +
@@ -7585,17 +7804,17 @@
         newPackets.forEach(function(p) {
           // Simpan ke evidenceByNode per node
           if (p.node_id) {
-            agentState.evidenceByNode[p.node_id] = agentState.evidenceByNode[p.node_id] || [];
-            var already = agentState.evidenceByNode[p.node_id].find(function(e){ return e.id === p.ref_id; });
+            activeRun().evidenceByNode[p.node_id] = activeRun().evidenceByNode[p.node_id] || [];
+            var already = activeRun().evidenceByNode[p.node_id].find(function(e){ return e.id === p.ref_id; });
             if (!already) {
-              agentState.evidenceByNode[p.node_id].push({
+              activeRun().evidenceByNode[p.node_id].push({
                 id: p.ref_id, title: p.title, url: p.url, year: p.year,
                 relevance_note: p.relevance, type: 'other', _source: 'evidence_agent', _for_node: p.node_id
               });
             }
           }
           // Simpan ke problem_context.references (global registry)
-          var ont = agentState.draftOntology;
+          var ont = activeDraft();
           if (ont && ont.problem_context) {
             if (!ont.problem_context.references) ont.problem_context.references = [];
             var alreadyGlobal = ont.problem_context.references.find(function(r){ return r.id === p.ref_id; });
@@ -7613,35 +7832,35 @@
         agentLog('orchestrator', 'evidence-done', newPackets.length + ' packets → evidenceByNode updated');
 
       } else if (step.agent === 'mapper') {
-        // Inject accumulated evidence ke mapper task
+        // Inject accumulated evidence + program_context ke mapper task
         var mapTask = Object.assign({}, step.task);
-        mapTask.evidence_packets = evidencePackets;
+        mapTask.evidence_packets  = evidencePackets;
+        mapTask.program_context   = ctx;  // ← inject program context
         mapTask.existing_nodes = {
           problem_ids: (ont && ont.problem_nodes||[]).map(function(n){return n.id;}),
           outcome_ids:  (ont && ont.outcome_nodes||[]).map(function(n){return n.id;})
         };
         var mapResult = await runMapperAgent(mapTask);
 
-        // Setelah mapper, reset evidence packets (sudah dikonsumsi)
         evidencePackets = [];
 
-        // Kalau mapper hit checkpoint — pause dan tunggu user
         var hitCheckpoint = mapResult.operations.some(function(op){ return op.tool === 'checkpoint'; });
         if (hitCheckpoint) {
           agentLog('orchestrator', 'checkpoint', 'Pause — tunggu user');
           agentUpdateModeBar('reviewing', 'Checkpoint', 'Review draft awal');
-          return; // Pause — agentContinueBuild akan melanjutkan
+          return;
         }
 
       } else if (step.agent === 'qa') {
-        // Jalankan QA Agent
         var qaTask = Object.assign({}, step.task);
+        qaTask.program_context = ctx;  // ← inject program context
         var qaResult = await runQAAgent(qaTask);
 
-        // Kalau QA butuh revisi dan ada step mapper setelahnya — inject flags
+        // Simpan hasil QA ke run state
+        if (activeRun()) activeRun().lastQAResult = qaResult;
+
         if (qaResult.needs_revision) {
           agentLog('orchestrator', 'qa-needs-revision', qaResult.flags.length + ' flags');
-          // Iterasi: cari apakah ada mapper step berikutnya yang bisa handle
           var nextMapper = plan.steps.slice(si+1).find(function(s){ return s.agent === 'mapper'; });
           if (nextMapper && nextMapper.task) {
             nextMapper.task.qa_flags = qaResult.flags;
@@ -7650,7 +7869,6 @@
           }
         }
 
-        // Update commit bar
         agentUpdateCommitBar();
       }
     }
@@ -7691,7 +7909,7 @@
 
   // ── IMPACT ASSESSOR ───────────────────────────────────────────────────
   function agentAssessImpact(changedNodeId, changeType, changeDetail) {
-    var ont = agentState.draftOntology;
+    var ont = activeDraft();
     if (!ont) return { level: 1, downstream_ids: [], touches_money: false };
 
     // Traverse downstream via relation_index
@@ -7740,7 +7958,7 @@
 
   // ── QA LOGIC ──────────────────────────────────────────────────────────
   function agentRunQALogic(scope) {
-    var ont = agentState.draftOntology;
+    var ont = activeDraft();
     if (!ont) return [];
     var flags = [];
     var ri = ont.relation_index || {};
@@ -7758,7 +7976,7 @@
         if (!mn) return;
         if (!mn.net_multiplier) flags.push({ node_id: mn.id, severity: 'error', message: 'net_multiplier kosong' });
         if (!(mn._agent_evidence && mn._agent_evidence.length) && mn.proxy_basis) flags.push({ node_id: mn.id, severity: 'warning', message: 'MON node berbasis proxy tanpa evidence' });
-        var ver = agentState.pendingVerifications.find(function(v){ return v.node_id === mn.id && v.status === 'pending'; });
+        var ver = activeRun().pendingVerifications.find(function(v){ return v.node_id === mn.id && v.status === 'pending'; });
         if (ver) flags.push({ node_id: mn.id, severity: 'info', message: 'Menunggu verifikasi: ' + ver.question });
       });
     }
@@ -7856,7 +8074,7 @@
 
     // Build evidence HTML
     // evidenceIds bisa berupa: array of ref_id strings, atau array of ref objects langsung
-    var ont = agentState.draftOntology;
+    var ont = activeDraft();
     var globalRefs = ont && ont.problem_context && ont.problem_context.references ? ont.problem_context.references : [];
 
     var evidHtml = '';
@@ -7900,7 +8118,7 @@
     }).join('');
 
     // Build verification HTML if flagged
-    var ver = agentState.pendingVerifications.find(function(v){ return v.node_id === nodeId && v.status === 'pending'; });
+    var ver = activeRun().pendingVerifications.find(function(v){ return v.node_id === nodeId && v.status === 'pending'; });
     var verHtml = '';
     if (ver) {
       var propStr = typeof ver.agent_proposal === 'object' ? JSON.stringify(ver.agent_proposal, null, 2) : String(ver.agent_proposal);
@@ -8010,12 +8228,12 @@
 
   // ── CARD ACTION HANDLERS ──────────────────────────────────────────────
   window.agentApproveNode = function(nodeId, col) {
-    var ont = agentState.draftOntology;
+    var ont = activeDraft();
     if (!ont || !ont[col]) return;
     var node = (ont[col]||[]).find(function(n){ return n && n.id === nodeId; });
     if (node) node._agent_status = 'approved';
     agentUpdateCardStatus(nodeId, 'approved');
-    agentState.pendingVerifications.forEach(function(v){
+    activeRun().pendingVerifications.forEach(function(v){
       if (v.node_id === nodeId && v.status === 'pending') v.status = 'accepted';
     });
     var verPanel = document.getElementById('ver-panel-' + nodeId);
@@ -8053,7 +8271,7 @@
   window.agentDeleteNode = function(nodeId, col) {
     // Assess impact first
     var impact = agentAssessImpact(nodeId, 'delete', {});
-    agentState.lastImpact = impact;
+    activeRun().lastImpact = impact;
 
     var msg = 'Hapus node ' + nodeId + '?';
     if (impact.downstream_ids.length) {
@@ -8064,7 +8282,7 @@
     if (!confirm(msg)) return;
 
     // Remove from draft
-    var ont = agentState.draftOntology;
+    var ont = activeDraft();
     if (ont && ont[col]) {
       ont[col] = ont[col].filter(function(n){ return !n || n.id !== nodeId; });
     }
@@ -8082,7 +8300,7 @@
 
   // ── EXECUTE REARRANGE — cascade changes after edit/delete ─────────────
   function executeRearrange(changedNodeId, changeType, changeDetail, proposal) {
-    var ont = agentState.draftOntology;
+    var ont = activeDraft();
     if (!ont) return;
     var changes = proposal || [];
 
@@ -8153,7 +8371,7 @@
   // Build rearrange proposal dari impact assessment
   function buildRearrangeProposal(impact, changeDetail) {
     var proposal = [];
-    var ont = agentState.draftOntology;
+    var ont = activeDraft();
     if (!ont) return proposal;
 
     impact.downstream_ids.forEach(function(downId) {
@@ -8226,7 +8444,7 @@
   }
 
   window.agentEditNode = function(nodeId, col) {
-    var ont = agentState.draftOntology;
+    var ont = activeDraft();
     var node = (ont&&ont[col]||[]).find(function(n){ return n&&n.id===nodeId; });
     if (!node) return;
 
@@ -8282,7 +8500,7 @@
   };
 
   window.agentSaveEdit = function(nodeId, col) {
-    var ont = agentState.draftOntology;
+    var ont = activeDraft();
     var node = (ont&&ont[col]||[]).find(function(n){ return n&&n.id===nodeId; });
     if (!node) return;
     var card = document.getElementById('anc-' + nodeId);
@@ -8315,7 +8533,7 @@
       old: changes[firstChange] && changes[firstChange].old,
       new: changes[firstChange] && changes[firstChange].new
     });
-    agentState.lastImpact = impact;
+    activeRun().lastImpact = impact;
 
     // Re-render card
     agentRenderCard(nodeId, col, node, node._agent_reasoning, node._agent_evidence_objects || node._agent_evidence || []);
@@ -8355,10 +8573,10 @@
 
   // ── COMMIT dengan DIFF PREVIEW ─────────────────────────────────────────
   window.agentCommit = function() {
-    var ont = agentState.draftOntology;
+    var ont = activeDraft();
     if (!ont) return;
 
-    var pending = agentState.pendingVerifications.filter(function(v){ return v.status==='pending'; });
+    var pending = activeRun().pendingVerifications.filter(function(v){ return v.status==='pending'; });
     var allCards = document.querySelectorAll('#agentCardsScroll .agent-node-card');
     var approvedCards = document.querySelectorAll('#agentCardsScroll .agent-node-card.approved');
     var flaggedCards = document.querySelectorAll('#agentCardsScroll .agent-node-card.flagged');
@@ -8468,8 +8686,10 @@
     var preview = document.getElementById('agentCommitPreview');
     if (preview) preview.remove();
     try {
-      AGENT_INTERFACE.commitToMain(agentState.draftOntology);
-      agentAppendBubble('agent', '✅ Ontologi berhasil di-commit ke sistem. Tutup modal untuk melihat hasilnya di dashboard.');
+      var runId = agentState.activeRunId;
+      if (!runId) throw new Error('Tidak ada run aktif.');
+      AGENT_INTERFACE.commitRunToStorage(runId);
+      agentAppendBubble('agent', '✅ Run "' + runId + '" berhasil di-commit. Tutup modal untuk melihat hasilnya di dashboard.');
       var commitBtn = document.getElementById('agentCommitBtn');
       if (commitBtn) commitBtn.disabled = true;
       renderApp();
@@ -8479,7 +8699,7 @@
   };
 
   window.agentShowRelations = function(nodeId) {
-    var ont = agentState.draftOntology;
+    var ont = activeDraft();
     if (!ont) return;
     var ri = ont.relation_index || {};
     var upstream = [], downstream = [];
@@ -8498,9 +8718,9 @@
 
   // Verification handlers
   window.agentVerAccept = function(nodeId, verId) {
-    var ver = agentState.pendingVerifications.find(function(v){ return v.id === verId; });
+    var ver = activeRun().pendingVerifications.find(function(v){ return v.id === verId; });
     if (ver) ver.status = 'accepted';
-    var ont = agentState.draftOntology;
+    var ont = activeDraft();
     // Set node approved
     var allCols = Object.keys(AGENT_INTERFACE.getSchema()).filter(function(k){ return Array.isArray(AGENT_INTERFACE.getSchema()[k]); });
     allCols.forEach(function(col) {
@@ -8510,8 +8730,8 @@
     agentUpdateCardStatus(nodeId, 'approved');
     var vp = document.getElementById('ver-panel-' + nodeId);
     if (vp) vp.remove();
-    if (agentState.buildProgress.blocking_on === nodeId) {
-      agentState.buildProgress.blocking_on = null;
+    if (activeProgress().blocking_on === nodeId) {
+      activeProgress().blocking_on = null;
       agentAppendBubble('agent', '✓ Verifikasi diterima. Melanjutkan build...');
       agentContinueBuild();
     }
@@ -8522,7 +8742,7 @@
   window.agentVerOverride = function(nodeId, verId) {
     var newVal = prompt('Masukkan nilai override untuk ' + nodeId + ':');
     if (newVal === null) return;
-    var ver = agentState.pendingVerifications.find(function(v){ return v.id === verId; });
+    var ver = activeRun().pendingVerifications.find(function(v){ return v.id === verId; });
     if (ver) { ver.status = 'overridden'; ver.human_override = newVal; }
     agentAppendBubble('agent', '⚠ Override diterima untuk ' + nodeId + ': ' + newVal + '\nAgent akan menyesuaikan...');
     // Kirim override sebagai pesan ke agent untuk ditindaklanjuti
@@ -8533,7 +8753,7 @@
   };
 
   window.agentVerDismiss = function(nodeId, verId) {
-    var ver = agentState.pendingVerifications.find(function(v){ return v.id === verId; });
+    var ver = activeRun().pendingVerifications.find(function(v){ return v.id === verId; });
     if (ver) ver.status = 'dismissed';
     agentUpdateCardStatus(nodeId, 'draft'); // kembali ke draft bukan flagged
     var vp = document.getElementById('ver-panel-' + nodeId);
@@ -8584,7 +8804,7 @@
   }
 
   function agentUpdateCommitBar() {
-    var ont = agentState.draftOntology;
+    var ont = activeDraft();
     if (!ont) return;
     var bar = document.getElementById('agentCommitBar');
     var stats = document.getElementById('agentCommitStats');
@@ -8598,7 +8818,7 @@
     cols.forEach(function(c){ nodeCount += (ont[c]||[]).length; });
 
     var fvaTotal = (ont.final_value_aggregates||[]).reduce(function(s,f){ return s+(f&&f.amount_idr||0); }, 0);
-    var pendingFlags = agentState.pendingVerifications.filter(function(v){ return v.status==='pending'; }).length;
+    var pendingFlags = activeRun().pendingVerifications.filter(function(v){ return v.status==='pending'; }).length;
 
     if (nodeCount > 0) {
       bar.style.display = 'flex';
@@ -8688,7 +8908,11 @@
   // ── AGENT ACTIVATE / DEACTIVATE ───────────────────────────────────────
   window.agentActivate = function() {
     agentState.active = true;
-    agentState.draftOntology = AGENT_INTERFACE.newDraft();
+
+    // Buat run sementara sampai Orchestrator extract program context
+    // Run ID akan di-update saat _extractProgramContext selesai
+    var tempRunId = 'RUN-' + Date.now();
+    createRun(tempRunId, null, AGENT_INTERFACE.newDraft());
 
     // agentWorkspace adalah sibling dari nlp-left & nlp-right di dalam #tab-nlp (display:grid)
     // Sembunyikan kedua kolom NLP, tampilkan workspace mengisi full grid
@@ -8719,17 +8943,14 @@
   };
 
   window.agentDeactivate = function() {
-    if (agentState.draftOntology) {
-      var nodeCount = (agentState.draftOntology.problem_nodes||[]).length + (agentState.draftOntology.outcome_nodes||[]).length;
+    var draft = activeDraft();
+    if (draft) {
+      var nodeCount = (draft.problem_nodes||[]).length + (draft.outcome_nodes||[]).length;
       if (nodeCount > 0 && !confirm('Tutup mode agen? Draft ' + nodeCount + ' nodes akan hilang.')) return;
     }
-    agentState.active = false;
-    agentState.draftOntology = null;
+    agentState.active       = false;
+    agentState.activeRunId  = null;
     agentState.agentHistory = [];
-    agentState.opLog = [];
-    agentState.pendingVerifications = [];
-    agentState.evidenceByNode = {};
-    agentState.buildProgress = { layers_done: [], current_layer: null, blocking_on: null };
 
     // Restore nlp-left & nlp-right
     var nlpLeft  = document.querySelector('#tab-nlp > .nlp-left');
@@ -8784,7 +9005,7 @@
     var sendBtn = document.getElementById('agentSendBtn');
     if (sendBtn) { sendBtn.disabled = true; sendBtn.textContent = '...'; }
 
-    var ont = agentState.draftOntology;
+    var ont = activeDraft();
     var probIds = (ont && ont.problem_nodes || []).map(function(n){ return n.id; }).join(', ');
     var ocIds   = (ont && ont.outcome_nodes  || []).map(function(n){ return n.id; }).join(', ');
 
@@ -8820,8 +9041,8 @@
   }
 
   window.agentPropagateChange = function() {
-    if (!agentState.lastImpact) return;
-    agentContinueBuildWithMessage('Propagate perubahan ke downstream nodes: ' + agentState.lastImpact.downstream_ids.join(', '));
+    if (!activeRun().lastImpact) return;
+    agentContinueBuildWithMessage('Propagate perubahan ke downstream nodes: ' + activeRun().lastImpact.downstream_ids.join(', '));
   };
 
   // ── QA + COMMIT ───────────────────────────────────────────────────────
