@@ -6295,17 +6295,72 @@
     return run ? (run.buildProgress || { layers_done:[], current_layer:null, blocking_on:null }) : null;
   }
 
+  // Urutan cluster fase 2 — tetap dan tidak berubah
+  var PHASE2_CLUSTER_ORDER = [
+    'activity',
+    'stakeholder_beneficiary',
+    'output_delivery',
+    'baseline',
+    'indicator',
+    'monetisation'
+  ];
+
+  // Allowed collections per cluster — Guard 1
+  var CLUSTER_ALLOWED_COLLECTIONS = {
+    'activity':               ['activity_nodes'],
+    'stakeholder_beneficiary':['stakeholder_nodes', 'beneficiary_nodes'],
+    'output_delivery':        ['output_delivery_nodes'],
+    'baseline':               ['baseline_nodes'],
+    'indicator':              ['indicator_nodes'],
+    'monetisation':           ['monetisation_pre_fix_nodes', 'impact_adjustment_nodes', 'final_value_nodes', 'final_value_aggregates']
+  };
+
+  // Completion rules per cluster — Guard 3
+  var CLUSTER_COMPLETION_RULES = {
+    'activity':               { min_nodes: 1, collections: ['activity_nodes'] },
+    'stakeholder_beneficiary':{ min_nodes: 2, collections: ['stakeholder_nodes','beneficiary_nodes'] },
+    'output_delivery':        { min_nodes: 1, collections: ['output_delivery_nodes'] },
+    'baseline':               { min_nodes: 1, collections: ['baseline_nodes'] },
+    'indicator':              { min_nodes: 1, collections: ['indicator_nodes'] },
+    'monetisation':           { min_nodes: 2, collections: ['monetisation_pre_fix_nodes'] }
+  };
+
+  // Helper: cari cluster berikutnya yang belum completed
+  function getNextIncompleteCluster(clusterState) {
+    if (!clusterState) return 'activity';
+    for (var i = 0; i < PHASE2_CLUSTER_ORDER.length; i++) {
+      var c = PHASE2_CLUSTER_ORDER[i];
+      if (clusterState[c] !== 'completed') return c;
+    }
+    return null; // semua selesai
+  }
+
   // Buat run baru dan set sebagai active
   function createRun(runId, programContext, draftOntology) {
+    // clusterState = source of truth untuk phase 2 progression
+    var clusterState = {};
+    PHASE2_CLUSTER_ORDER.forEach(function(c){ clusterState[c] = 'pending'; });
+
     agentState.programRuns[runId] = {
-      programContext:       programContext || {},
-      draftOntology:        draftOntology  || AGENT_INTERFACE.newDraft(),
-      evidenceByNode:       {},
-      buildProgress:        { layers_done: [], current_layer: null, blocking_on: null },
+      programContext:  programContext || {},
+      draftOntology:   draftOntology  || AGENT_INTERFACE.newDraft(),
+      evidenceByNode:  {},
+
+      // clusterState: flat, single source of truth untuk phase 2
+      clusterState:    clusterState,
+
+      // buildProgress: status proses aktif saat ini (bukan history)
+      buildProgress: {
+        current_cluster: null,
+        next_cluster:    'activity',
+        blocking_on:     null
+      },
+
       lastQAResult:         { flags: [], scores: {}, needs_revision: false },
       pendingVerifications: [],
       opLog:                [],
-      lastImpact:           null
+      lastImpact:           null,
+      activeCluster:        null  // untuk scope guard di create_node
     };
     agentState.activeRunId = runId;
     return agentState.programRuns[runId];
@@ -6340,10 +6395,18 @@
       cols.forEach(function(col) {
         (ont[col]||[]).forEach(function(n) {
           if (n) {
+            // Guard 4: hanya commit node yang accepted atau tanpa candidate_status (fase 1)
+            // Node fase 2 dengan pending_review/rejected tidak ikut commit
             delete n._agent_status; delete n._agent_reasoning;
             delete n._agent_evidence; delete n._agent_evidence_objects;
             delete n._mon_source_type; delete n._mon_paired_with;
+            delete n._candidate_status; delete n._binding_quality;
+            delete n._foundation_binding; delete n._assigned_extra;
           }
+        });
+        // Filter: buang node yang rejected
+        ont[col] = (ont[col]||[]).filter(function(n){
+          return n && n._candidate_status !== 'rejected';
         });
       });
       ont.ontology_meta.status = 'experimental_working_model';
@@ -6585,42 +6648,75 @@
       case 'create_node': {
         var col = args.collection;
         var data = Object.assign({}, args.extra_fields || {});
-        data.id     = args.node_id;
-        data.label  = data.label || args.label || '';
+        data.id    = args.node_id;
+        data.label = data.label || args.label || '';
         if (!data.id && args.data && args.data.id) { data = Object.assign({}, args.data); }
         if (!data.id) { console.error('[AGENT] create_node tanpa node_id!', args); return { error: 'node_id wajib' }; }
 
-        // INTERCEPT: problem node tanpa evidence → auto-trigger search dulu
-        if (col === 'problem_nodes' && (!args.evidence_ids || !args.evidence_ids.length)) {
-          console.warn('[AGENT] Problem node tanpa evidence — auto search untuk', data.id);
-          var autoQuery = (data.label || args.label || data.id) + ' masalah sosial ekonomi Indonesia CSR program';
-          var autoResults = await agentSearchBatch(autoQuery, [data.id], 'problem_framing', 3);
-          if (autoResults.length) {
-            args.evidence_ids = autoResults.map(function(r){ return r.id; });
-            agentAppendBubble('agent', '🔍 Auto-search evidence untuk ' + data.id + ' → ' + autoResults.length + ' referensi ditemukan.');
+        // ── Guard 1: SCOPE VIOLATION check ──────────────────────────────
+        var activeCluster = activeRun() && activeRun().activeCluster;
+        if (activeCluster && CLUSTER_ALLOWED_COLLECTIONS[activeCluster]) {
+          var allowedCols = CLUSTER_ALLOWED_COLLECTIONS[activeCluster];
+          if (!allowedCols.includes(col)) {
+            var violation = 'SCOPE VIOLATION: cluster "' + activeCluster + '" tidak boleh membuat node di "' + col + '". Diizinkan: ' + allowedCols.join(', ');
+            activeRun().opLog.push({ id: opId, tool: 'scope_violation', cluster: activeCluster, attempted_collection: col, node_id: data.id });
+            console.warn('[AGENT]', violation);
+            return { error: violation };
           }
         }
 
-        data._agent_status    = 'draft';
-        data._agent_reasoning = args.reasoning || '';
-        data._agent_evidence  = args.evidence_ids || [];
-        if (args.mon_source_type) data._mon_source_type = args.mon_source_type;
-        if (args.mon_paired_with) data._mon_paired_with = args.mon_paired_with;
+        // ── Idempotency: cek duplikat di seluruh collections ────────────
         if (!Array.isArray(ont[col])) ont[col] = [];
         var existingNode = ont[col].find(function(n){ return n && n.id === data.id; });
         if (existingNode) {
-          console.warn('[AGENT] Duplikat ID:', data.id, '— skip');
-          return { error: 'Node ' + data.id + ' sudah ada di ' + col };
+          console.warn('[AGENT] Idempotency: node', data.id, 'sudah ada — skip');
+          return { skipped: true, node_id: data.id, reason: 'already_exists' };
         }
-        console.log('[AGENT] create_node:', data.id, 'di', col, '| label:', data.label, '| evidence_ids:', args.evidence_ids||[]);
+
+        // ── Auto-search untuk problem node tanpa evidence ────────────────
+        if (col === 'problem_nodes' && (!args.evidence_ids || !args.evidence_ids.length)) {
+          var autoQuery = (data.label || data.id) + ' masalah sosial ekonomi Indonesia CSR';
+          var autoResults = await agentSearchBatch(autoQuery, [data.id], 'problem_framing', 3);
+          if (autoResults.length) {
+            args.evidence_ids = autoResults.map(function(r){ return r.id; });
+            agentAppendBubble('agent', '🔍 Auto-search evidence untuk ' + data.id + ' → ' + autoResults.length + ' referensi.');
+          }
+        }
+
+        // ── Set status fields ────────────────────────────────────────────
+        data._agent_status    = 'draft';
+        data._agent_reasoning = args.reasoning || '';
+        data._agent_evidence  = args.evidence_ids || [];
+
+        // Guard 4: candidate_status — fase 2 nodes mulai sebagai pending_review
+        data._candidate_status = activeCluster ? 'pending_review' : 'accepted';
+
+        // Guard 2: foundation_binding
+        if (args.foundation_binding) {
+          var fb = args.foundation_binding;
+          var hasProblems = fb.anchored_problems && fb.anchored_problems.length > 0;
+          var hasReasoning = fb.binding_reasoning && fb.binding_reasoning.length > 5;
+          data._foundation_binding = fb;
+          data._binding_quality = (hasProblems && hasReasoning) ? 'strong' : 'weak';
+        } else if (activeCluster) {
+          // Fase 2 tanpa binding → flag weak
+          data._foundation_binding = null;
+          data._binding_quality = 'missing';
+        }
+
+        if (args.mon_source_type) data._mon_source_type = args.mon_source_type;
+        if (args.mon_paired_with) data._mon_paired_with = args.mon_paired_with;
+
         ont[col].push(data);
 
         var nodeEvidObjs = activeRun().evidenceByNode[data.id] || [];
         if (nodeEvidObjs.length) data._agent_evidence_objects = nodeEvidObjs;
 
-        activeRun().opLog.push({ id: opId, tool: 'create_node', collection: col, node_id: data.id, reasoning: args.reasoning });
+        activeRun().opLog.push({ id: opId, tool: 'create_node', collection: col, node_id: data.id,
+          candidate_status: data._candidate_status, binding_quality: data._binding_quality || 'n/a' });
+
         agentRenderCard(data.id, col, data, args.reasoning, nodeEvidObjs.length ? nodeEvidObjs : (args.evidence_ids || []));
-        return { success: true, node_id: data.id, collection: col };
+        return { success: true, node_id: data.id, collection: col, candidate_status: data._candidate_status };
       }
 
       case 'link_nodes': {
@@ -6794,32 +6890,117 @@
       }
 
       case 'checkpoint': {
-        activeProgress().layers_done.push('problem', 'outcome');
+        var run       = activeRun();
+        var progress  = run && run.buildProgress;
+        var ont       = activeDraft();
+        var cluster   = run && run.activeCluster; // null = fase 1
+
+        activeRun().opLog.push({ id: opId, tool: 'checkpoint', summary: args.summary, cluster: cluster });
+
+        // ── Guard 3: Completion validation ──────────────────────────────
+        var completionWarnings = [];
+        if (cluster && CLUSTER_COMPLETION_RULES[cluster]) {
+          var rule = CLUSTER_COMPLETION_RULES[cluster];
+          rule.collections.forEach(function(col) {
+            var nodes = (ont && ont[col] || []).filter(function(n){
+              return n && n._candidate_status === 'pending_review';
+            });
+            if (nodes.length < (rule.min_nodes / rule.collections.length)) {
+              completionWarnings.push('Cluster "' + cluster + '" kurang node di ' + col + ' (min: ' + rule.min_nodes + ')');
+            }
+            // Cek foundation binding
+            var missingBinding = nodes.filter(function(n){
+              return !n._foundation_binding || !n._foundation_binding.anchored_problems || !n._foundation_binding.anchored_problems.length;
+            });
+            if (missingBinding.length) {
+              completionWarnings.push(missingBinding.length + ' node tanpa foundation binding di cluster ' + cluster);
+            }
+          });
+        }
+
+        // ── Update cluster progress — clusterState sebagai source of truth ──
+        if (cluster && run) {
+          // 1. Update clusterState DULU sebelum apapun
+          if (run.clusterState) {
+            run.clusterState[cluster] = completionWarnings.length ? 'completed_with_warnings' : 'completed';
+          }
+
+          // 2. Hitung next_cluster dari clusterState (bukan dari index manual)
+          var nextFromState = getNextIncompleteCluster(run.clusterState);
+          run.buildProgress.next_cluster    = nextFromState;
+          run.buildProgress.current_cluster = null;
+
+          // 3. Clear activeCluster SETELAH semua update selesai
+          run.activeCluster = null;
+
+        } else if (!cluster) {
+          // Fase 1 checkpoint — tidak ada cluster state yang perlu diupdate
+        }
+
         agentState.mode = 'reviewing';
-        agentUpdateModeBar('reviewing', 'Checkpoint — Review Draft Awal', args.summary || '');
-        activeRun().opLog.push({ id: opId, tool: 'checkpoint', summary: args.summary });
+        agentUpdateModeBar('reviewing', cluster ? 'Checkpoint — ' + cluster.toUpperCase() : 'Checkpoint — Fase 1', args.summary || '');
 
-        // Hitung ringkasan nodes yang sudah dibuat
-        var ont = activeDraft();
-        var probCount = (ont && ont.problem_nodes || []).length;
-        var ocCount   = (ont && ont.outcome_nodes  || []).length;
-
-        // Render checkpoint card di chat dengan tombol Lanjut
+        // ── Render checkpoint card ───────────────────────────────────────
         var scroll = document.getElementById('agentChatScroll');
         if (scroll) {
           var ckDiv = document.createElement('div');
           ckDiv.className = 'agent-bubble agent';
           ckDiv.style.cssText = 'border:1.5px solid #a7f3d0;background:#f0fdf8;';
-          ckDiv.innerHTML = '<div class="agent-bubble-label" style="color:#059669;">✅ Checkpoint</div>'
-            + '<div style="font-size:13px;line-height:1.6;margin-bottom:10px;">'
-            + (args.summary || 'Draft awal selesai.') + '<br><br>'
-            + '<strong>' + probCount + '</strong> problem nodes · <strong>' + ocCount + '</strong> outcome nodes sudah dibuat.'
-            + '</div>'
-            + '<div style="font-size:12px;color:#374151;margin-bottom:10px;">Silakan review cards di kanan. Edit, hapus, atau tambah node sesuai kebutuhan.</div>'
-            + '<div style="display:flex;gap:8px;flex-wrap:wrap;">'
-            + '<button onclick="agentContinueBuild()" style="padding:7px 16px;background:#059669;color:white;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;">▶ Lanjutkan Build (layer berikutnya)</button>'
-            + '<button onclick="agentRunQA()" style="padding:7px 16px;background:#f8fafc;color:#374151;border:1.5px solid #e2e8f0;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;">🔍 QA Sekarang</button>'
-            + '</div>';
+
+          // Cluster progress bar — baca dari run.clusterState
+          var progressBar = '';
+          if (cluster && run && run.clusterState) {
+            progressBar = '<div style="display:flex;gap:4px;margin-bottom:10px;">';
+            PHASE2_CLUSTER_ORDER.forEach(function(c) {
+              var st    = run.clusterState[c] || 'pending';
+              var color = st === 'completed' ? '#059669'
+                        : st === 'completed_with_warnings' ? '#d97706'
+                        : st === 'in_progress' ? '#2563eb'
+                        : '#e2e8f0';
+              var txtColor = st === 'pending' ? '#94a3b8' : 'white';
+              var lbl   = c.replace(/_/g,' ').replace('stakeholder beneficiary','stk+ben');
+              progressBar += '<div style="flex:1;padding:3px 4px;background:' + color
+                + ';border-radius:4px;font-size:9px;color:' + txtColor
+                + ';text-align:center;font-weight:700;">' + lbl + '</div>';
+            });
+            progressBar += '</div>';
+          }
+
+          // Stats
+          var probCount = (ont && ont.problem_nodes || []).length;
+          var ocCount   = (ont && ont.outcome_nodes  || []).length;
+          var clusterStats = '';
+          if (cluster) {
+            var allowedCols2 = CLUSTER_ALLOWED_COLLECTIONS[cluster] || [];
+            var clusterNodeCount = allowedCols2.reduce(function(sum, col2) {
+              return sum + (ont && ont[col2] || []).filter(function(n){ return n && n._candidate_status === 'pending_review'; }).length;
+            }, 0);
+            clusterStats = '<strong>' + clusterNodeCount + '</strong> candidate cards untuk cluster <strong>' + cluster.replace(/_/g,' ').toUpperCase() + '</strong>';
+          } else {
+            clusterStats = '<strong>' + probCount + '</strong> problem nodes · <strong>' + ocCount + '</strong> outcome nodes';
+          }
+
+          // Warnings
+          var warningHtml = completionWarnings.length
+            ? '<div style="margin:8px 0;padding:8px;background:#fffbeb;border-radius:6px;">'
+              + completionWarnings.map(function(w){ return '⚠ ' + esc(w); }).join('<br>')
+              + '</div>' : '';
+
+          // Next cluster button — ambil dari run.buildProgress.next_cluster (sudah diupdate dari clusterState)
+          var nextClusterBtn = run && run.buildProgress && run.buildProgress.next_cluster;
+          var nextBtn = nextClusterBtn
+            ? '<button onclick="agentBuildCluster(\'' + nextClusterBtn + '\')" style="padding:7px 16px;background:#059669;color:white;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;">▶ Lanjut: ' + nextClusterBtn.replace(/_/g,' ').toUpperCase() + '</button>'
+            : '<button onclick="agentRunQA()" style="padding:7px 16px;background:#2563eb;color:white;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;">✅ Semua selesai — Jalankan QA</button>';
+          var qaBtn = '<button onclick="agentRunQA()" style="padding:7px 16px;background:#f8fafc;color:#374151;border:1.5px solid #e2e8f0;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;">🔍 QA</button>';
+
+          ckDiv.innerHTML = '<div class="agent-bubble-label" style="color:#059669;">✅ Checkpoint' + (cluster ? ' — ' + cluster.replace('_',' ').toUpperCase() : '') + '</div>'
+            + progressBar
+            + '<div style="font-size:13px;margin-bottom:8px;">' + clusterStats + '</div>'
+            + (args.summary ? '<div style="font-size:12px;color:#374151;margin-bottom:6px;">' + esc(args.summary) + '</div>' : '')
+            + warningHtml
+            + '<div style="font-size:12px;color:#374151;margin-bottom:10px;">Review candidate cards di kanan sebelum lanjut.</div>'
+            + '<div style="display:flex;gap:8px;flex-wrap:wrap;">' + nextBtn + qaBtn + '</div>';
+
           scroll.appendChild(ckDiv);
           scroll.scrollTop = scroll.scrollHeight;
         }
@@ -7706,6 +7887,15 @@
     agentUpdateModeBar('building', '🗂 ' + clusterName.toUpperCase(), 'Membangun cluster...');
     agentLog('orchestrator', 'cluster', clusterName);
 
+    // Set state eksplisit — clusterState sebagai source of truth
+    var run = activeRun();
+    if (run) {
+      run.activeCluster                    = clusterName;
+      run.buildProgress.current_cluster    = clusterName;
+      run.buildProgress.next_cluster       = clusterName; // sementara, diupdate setelah checkpoint
+      if (run.clusterState) run.clusterState[clusterName] = 'in_progress';
+    }
+
     var brief = _buildClusterBrief(clusterName, foundation, ctx);
 
     // Kalau cluster ini butuh evidence (MON-PRX) — panggil Evidence Agent dulu
@@ -7799,6 +7989,18 @@
 
     agentLog('orchestrator', 'phase2', 'Memulai build cluster-by-cluster');
 
+    // Tentukan cluster mana yang harus dibangun — baca dari clusterState
+    var run = activeRun();
+    var nextCluster = run && run.clusterState
+      ? getNextIncompleteCluster(run.clusterState)
+      : 'activity';
+
+    if (!nextCluster) {
+      agentAppendBubble('agent', '✅ Semua cluster sudah selesai. Jalankan QA untuk verifikasi final.');
+      agentUpdateModeBar('reviewing', 'Selesai', 'Semua cluster completed');
+      return;
+    }
+
     // Tampilkan foundation summary ke user
     var probSummary = foundation.problems.map(function(p){ return p.id + ': ' + p.label; }).join('\n');
     var ocSummary   = foundation.outcomes.map(function(o){ return o.id + ': ' + o.label; }).join('\n');
@@ -7825,9 +8027,9 @@
       scroll.scrollTop = scroll.scrollHeight;
     }
 
-    // Auto-start dengan cluster pertama: activity
-    agentUpdateModeBar('building', 'Fase 2', 'Mulai dari cluster ACTIVITY');
-    await _buildCluster('activity');
+    // Auto-start dari cluster yang belum selesai (bukan selalu activity)
+    agentUpdateModeBar('building', 'Fase 2', 'Mulai dari cluster: ' + nextCluster.toUpperCase());
+    await _buildCluster(nextCluster);
   }
   // Dipanggil oleh Orchestrator saat: build scenario baru, atau fingerprint berubah.
   // Return: { master, runId, programContext }
@@ -8426,19 +8628,71 @@
 
     var label = data.label || data.name || data.aspect || data.indicator || nodeId;
 
+    // Guard 4: candidate_status badge
+    var candidateStatus = data._candidate_status || null;
+    var statusBadgeText = status === 'approved' ? '✓ Approved' : status === 'flagged' ? '⚠ Flagged' : 'Draft';
+    var statusBadgeStyle = '';
+    if (candidateStatus === 'pending_review') {
+      statusBadgeText  = '🔄 Pending Review';
+      statusBadgeStyle = 'background:#f1f5f9;color:#475569;';
+    } else if (candidateStatus === 'accepted') {
+      statusBadgeText  = '✓ Accepted';
+      statusBadgeStyle = 'background:#f0fdf4;color:#059669;';
+    } else if (candidateStatus === 'rejected') {
+      statusBadgeText  = '✗ Ditolak';
+      statusBadgeStyle = 'background:#fef2f2;color:#dc2626;';
+    } else if (candidateStatus === 'revision_requested') {
+      statusBadgeText  = '✏ Perlu Revisi';
+      statusBadgeStyle = 'background:#fef3c7;color:#92400e;';
+    }
+
+    // Guard 2: foundation binding section
+    var bindingHtml = '';
+    if (data._foundation_binding) {
+      var fb = data._foundation_binding;
+      var bindingColor = data._binding_quality === 'strong' ? '#059669' : data._binding_quality === 'weak' ? '#d97706' : '#dc2626';
+      bindingHtml = '<div style="margin:4px 13px 0;padding:7px 10px;background:#f8fafc;border-left:3px solid ' + bindingColor + ';border-radius:0 6px 6px 0;font-size:11px;">'
+        + '<div style="font-weight:800;color:' + bindingColor + ';margin-bottom:3px;">🔗 Foundation Binding</div>'
+        + (fb.anchored_problems && fb.anchored_problems.length ? '<div>↳ Problem: ' + esc(fb.anchored_problems.join(', ')) + '</div>' : '')
+        + (fb.anchored_outcomes && fb.anchored_outcomes.length ? '<div>↳ Outcome: ' + esc(fb.anchored_outcomes.join(', ')) + '</div>' : '')
+        + (fb.binding_reasoning ? '<div style="color:#6b7280;margin-top:2px;">' + esc(fb.binding_reasoning.slice(0,100)) + (fb.binding_reasoning.length>100?'…':'') + '</div>' : '')
+        + '</div>';
+    } else if (data._binding_quality === 'missing' || data._binding_quality === 'weak') {
+      bindingHtml = '<div style="margin:4px 13px 0;padding:5px 10px;background:#fef3c7;border-radius:6px;font-size:11px;color:#92400e;">⚠ Tidak ada foundation binding</div>';
+    }
+
+    // Tombol aksi — sesuaikan dengan candidate_status
+    var actionBtns = '';
+    if (candidateStatus === 'pending_review') {
+      actionBtns = '<button class="anc-action-btn approve" onclick="agentApproveNode(\''+nodeId+'\',\''+col+'\')">✓ Terima</button>'
+        + '<button class="anc-action-btn" style="border-color:#fde68a;color:#92400e;" onclick="agentRequestRevision(\''+nodeId+'\',\''+col+'\')">✏ Revisi</button>'
+        + '<button class="anc-action-btn danger" onclick="agentRejectNode(\''+nodeId+'\',\''+col+'\')">✗ Tolak</button>';
+    } else if (candidateStatus === 'accepted' || status === 'approved') {
+      actionBtns = '<span style="font-size:11px;color:#059669;font-weight:700;">✓ Accepted</span>';
+    } else if (candidateStatus === 'rejected') {
+      actionBtns = '<span style="font-size:11px;color:#dc2626;font-weight:700;">✗ Ditolak</span>'
+        + '<button class="anc-action-btn" onclick="agentApproveNode(\''+nodeId+'\',\''+col+'\')">↩ Pulihkan</button>';
+    } else {
+      // Fase 1 atau node tanpa candidate_status
+      actionBtns = (status !== 'approved'
+        ? '<button class="anc-action-btn approve" onclick="agentApproveNode(\''+nodeId+'\',\''+col+'\')">✓ Terima</button>'
+        : '<span style="font-size:11px;color:#059669;font-weight:700;">✓ Approved</span>');
+    }
+
     var html = '<div class="agent-node-card '+status+'" id="anc-'+nodeId+'" data-col="'+col+'" data-status="'+status+'" data-node-id="'+nodeId+'">'
       + '<div class="anc-header">'
       + '<span class="anc-id '+colClass+'">'+esc(nodeId)+'</span>'
       + '<span class="anc-collection-tag">'+esc(agentColLabel(col))+'</span>'
-      + '<span class="anc-status-badge '+status+'">'+(status==='draft'?'Draft':status==='approved'?'✓ Approved':'⚠ Flagged')+'</span>'
+      + '<span class="anc-status-badge '+status+'" style="'+statusBadgeStyle+'">'+statusBadgeText+'</span>'
       + '</div>'
       + '<div class="anc-label">'+esc(label)+'</div>'
       + (fieldsHtml ? '<div class="anc-content">'+fieldsHtml+'</div>' : '')
       + (reasoning ? '<div class="anc-reasoning"><div class="anc-reasoning-label">💭 Reasoning</div>'+esc(reasoning)+'</div>' : '')
+      + bindingHtml
       + evidHtml
       + verHtml
       + '<div class="anc-actions">'
-      + (status !== 'approved' ? '<button class="anc-action-btn approve" onclick="agentApproveNode(\''+nodeId+'\',\''+col+'\')">✓ Terima</button>' : '<span style="font-size:11px;color:#059669;font-weight:700;">✓ Approved</span>')
+      + actionBtns
       + '<button class="anc-action-btn edit" onclick="agentEditNode(\''+nodeId+'\',\''+col+'\')">✏ Edit</button>'
       + '<button class="anc-action-btn relation" onclick="agentShowRelations(\''+nodeId+'\')">🔗 Relasi</button>'
       + '<button class="anc-action-btn danger" onclick="agentDeleteNode(\''+nodeId+'\',\''+col+'\')">✕</button>'
@@ -8523,7 +8777,10 @@
     var ont = activeDraft();
     if (!ont || !ont[col]) return;
     var node = (ont[col]||[]).find(function(n){ return n && n.id === nodeId; });
-    if (node) node._agent_status = 'approved';
+    if (node) {
+      node._agent_status    = 'approved';
+      node._candidate_status = 'accepted';  // Guard 4
+    }
     agentUpdateCardStatus(nodeId, 'approved');
     activeRun().pendingVerifications.forEach(function(v){
       if (v.node_id === nodeId && v.status === 'pending') v.status = 'accepted';
@@ -8531,33 +8788,61 @@
     var verPanel = document.getElementById('ver-panel-' + nodeId);
     if (verPanel) verPanel.remove();
 
-    // Auto-delete pasangan MON (INT↔PRX)
+    // Auto-delete pasangan MON
     if (node && node._mon_paired_with) {
       var pairedId = node._mon_paired_with;
-      // Hapus dari draftOntology
       if (ont[col]) ont[col] = ont[col].filter(function(n){ return !n || n.id !== pairedId; });
-      // Hapus card
       var pairedCard = document.getElementById('anc-' + pairedId);
       if (pairedCard) {
         pairedCard.style.transition = 'opacity 0.3s';
         pairedCard.style.opacity = '0';
         setTimeout(function(){ if (pairedCard.parentNode) pairedCard.remove(); }, 300);
       }
-      // Hapus dari relation_index
       var ri = ont.relation_index || {};
       Object.keys(ri).forEach(function(k) {
         if (ri[k] && ri[k][pairedId]) delete ri[k][pairedId];
         Object.keys(ri[k]||{}).forEach(function(fid) {
-          if (Array.isArray(ri[k][fid])) {
-            ri[k][fid] = ri[k][fid].filter(function(tid){ return tid !== pairedId; });
-          }
+          if (Array.isArray(ri[k][fid])) ri[k][fid] = ri[k][fid].filter(function(tid){ return tid !== pairedId; });
         });
       });
-      agentAppendBubble('agent', '🗑 ' + pairedId + ' dihapus otomatis (pasangan dari ' + nodeId + ' yang di-approve).');
+      agentAppendBubble('agent', '🗑 ' + pairedId + ' dihapus (pasangan dari ' + nodeId + ').');
     }
 
     agentUpdateProgressBar();
     agentUpdateCommitBar();
+  };
+
+  window.agentRejectNode = function(nodeId, col) {
+    var ont = activeDraft();
+    if (!ont || !ont[col]) return;
+    var node = (ont[col]||[]).find(function(n){ return n && n.id === nodeId; });
+    if (node) {
+      node._agent_status     = 'flagged';
+      node._candidate_status = 'rejected';
+    }
+    // Visual: card menjadi merah muda, badge "✗ Rejected"
+    var card = document.getElementById('anc-' + nodeId);
+    if (card) {
+      card.style.opacity = '0.5';
+      card.style.border  = '1.5px solid #fca5a5';
+      var badge = card.querySelector('.anc-status-badge');
+      if (badge) { badge.textContent = '✗ Ditolak'; badge.style.background='#fef2f2'; badge.style.color='#dc2626'; }
+    }
+    agentUpdateProgressBar();
+    agentUpdateCommitBar();
+  };
+
+  window.agentRequestRevision = function(nodeId, col) {
+    var ont = activeDraft();
+    if (!ont || !ont[col]) return;
+    var node = (ont[col]||[]).find(function(n){ return n && n.id === nodeId; });
+    if (node) node._candidate_status = 'revision_requested';
+    var card = document.getElementById('anc-' + nodeId);
+    if (card) {
+      var badge = card.querySelector('.anc-status-badge');
+      if (badge) { badge.textContent = '✏ Perlu Revisi'; badge.style.background='#fef3c7'; badge.style.color='#92400e'; }
+    }
+    agentUpdateProgressBar();
   };
 
   window.agentDeleteNode = function(nodeId, col) {
@@ -9292,23 +9577,38 @@
     var sendBtn = document.getElementById('agentSendBtn');
     if (sendBtn) { sendBtn.disabled = true; sendBtn.textContent = '...'; }
 
-    var ont = activeDraft();
-    var probIds = (ont && ont.problem_nodes || []).map(function(n){ return n.id; }).join(', ');
-    var ocIds   = (ont && ont.outcome_nodes  || []).map(function(n){ return n.id; }).join(', ');
+    var run      = activeRun();
+    var progress = run && run.buildProgress;
+    var cs       = run && run.clusterState;
 
-    agentAppendBubble('user', '▶ Lanjutkan build fase 2');
+    // Cek apakah fase 2 sudah dimulai (ada cluster yang in_progress atau completed)
+    var phase2Started = cs && PHASE2_CLUSTER_ORDER.some(function(c){
+      return cs[c] === 'completed' || cs[c] === 'completed_with_warnings' || cs[c] === 'in_progress';
+    });
 
-    try {
-      // Kirim ke Orchestrator — intent eksplisit build_phase2
-      await runOrchestrator(
-        '__SYSTEM__: build_phase2. ' +
-        'Problem nodes: ' + (probIds || '–') + '. ' +
-        'Outcome nodes: ' + (ocIds || '–') + '. ' +
-        'Lanjutkan ke activity, output, stakeholder, beneficiary, baseline, indicator, MON (dual INT+PRX), ADJ, FV, FVA, QA.'
-      );
-    } catch(err) {
-      agentAppendBubble('agent', '⚠ Error: ' + err.message);
+    if (phase2Started) {
+      // Resume dari next_cluster (sudah dihitung dari clusterState saat checkpoint)
+      var nextCluster = getNextIncompleteCluster(cs);
+      if (nextCluster) {
+        agentAppendBubble('user', '▶ Lanjut cluster: ' + nextCluster.replace(/_/g,' '));
+        try {
+          await _buildCluster(nextCluster);
+        } catch(err) {
+          agentAppendBubble('agent', '⚠ Error: ' + err.message);
+        }
+      } else {
+        agentAppendBubble('agent', '✅ Semua cluster selesai. Jalankan QA untuk verifikasi.');
+      }
+    } else {
+      // Fase 2 belum dimulai — mulai dari awal
+      agentAppendBubble('user', '▶ Lanjutkan build fase 2');
+      try {
+        await runOrchestrator('__SYSTEM__: build_phase2');
+      } catch(err) {
+        agentAppendBubble('agent', '⚠ Error: ' + err.message);
+      }
     }
+
     if (sendBtn) { sendBtn.disabled = false; sendBtn.textContent = 'Kirim'; }
     agentUpdateCommitBar();
   }
