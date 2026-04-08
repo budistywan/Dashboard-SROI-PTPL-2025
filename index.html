@@ -7385,17 +7385,26 @@
       : '';
 
     var systemPrompt = 'Kamu adalah Ontology Mapper Agent untuk SROI/TJSL program CSR Indonesia.\n\n' +
-      'PERANMU: Buat dan hubungkan nodes sesuai daftar yang diberikan. Tidak search, tidak bertanya, tidak ngobrol.\n' +
-      'OUTPUT: Hanya tool calls. Tidak ada teks bebas.\n\n' +
-      'ATURAN WAJIB:\n' +
-      '- Buat SEMUA node yang ada di daftar NODE YANG HARUS DIBUAT\n' +
-      '- Setiap problem_node WAJIB pakai evidence_ids dari ref_id yang tersedia di atas\n' +
-      '- node_id WAJIB persis seperti yang tercantum di daftar\n' +
-      '- Untuk MON: selalu buat PASANGAN INT + PRX\n' +
-      '  MON-[ASPEK]-INT (mon_source_type:"internal_report", mon_paired_with:"MON-[ASPEK]-PRX")\n' +
-      '  MON-[ASPEK]-PRX (mon_source_type:"proxy", mon_paired_with:"MON-[ASPEK]-INT")\n' +
-      '- Setelah semua node dibuat: panggil link_nodes untuk relasi, lalu checkpoint()\n\n' +
-      'SCHEMA ONTOLOGI:\n' + schema + evidenceCtx + plannedCtx + existingCtx;
+      'PERANMU: Buat dan hubungkan nodes sesuai instruksi. Tidak search, tidak bertanya, tidak ngobrol.\n' +
+      'OUTPUT: Hanya tool calls.\n\n' +
+      'ATURAN LABEL — WAJIB:\n' +
+      '- Label HARUS spesifik terhadap konteks program yang diberikan\n' +
+      '- DILARANG menggunakan label generik seperti:\n' +
+      '  "Pelatihan Keterampilan", "Pemberdayaan Usaha Mikro",\n' +
+      '  "Peningkatan Kapasitas", "Kegiatan Sosial", "Activity 1"\n' +
+      '- Setiap label harus menyebut SIAPA, MELAKUKAN APA, UNTUK APA\n' +
+      '- Contoh BENAR: "Pelatihan Perawatan Mesin Kapal dan Penggunaan Pelumas Pertamina"\n' +
+      '- Contoh SALAH: "Pelatihan Keterampilan"\n\n' +
+      'ATURAN ANCHOR:\n' +
+      '- Activity harus menjawab problem yang ada di instruksi\n' +
+      '- Output harus logis sebagai hasil activity\n' +
+      '- Stakeholder harus spesifik ke program, bukan template\n\n' +
+      'ATURAN MON:\n' +
+      '- Selalu buat PASANGAN: MON-[ASPEK]-INT + MON-[ASPEK]-PRX\n' +
+      '- INT: mon_source_type:"internal_report", mon_paired_with:"MON-[ASPEK]-PRX"\n' +
+      '- PRX: mon_source_type:"proxy", mon_paired_with:"MON-[ASPEK]-INT"\n\n' +
+      'SETELAH SELESAI: panggil checkpoint()\n\n' +
+      'SCHEMA:\n' + schema + evidenceCtx + plannedCtx + existingCtx;
 
     // Mapper pakai tool_choice: required — wajib panggil tools, tidak boleh ngobrol
     var mapperTools = AGENT_TOOL_DEFS.filter(function(t) {
@@ -7528,7 +7537,298 @@
     return { flags: allFlags, scores: scores, needs_revision: needsRevision, summary: summary };
   }
 
-  // ── _extractProgramContext ────────────────────────────────────────────
+  // ── GENERIC LABEL GUARD ───────────────────────────────────────────────
+  var GENERIC_LABEL_PATTERNS = [
+    /^pelatihan keterampilan$/i,
+    /^pemberdayaan (usaha|masyarakat)/i,
+    /^peningkatan kapasitas/i,
+    /^penguatan kelembagaan/i,
+    /^kegiatan (sosial|csr)$/i,
+    /^program pemberdayaan$/i,
+    /^activity \d+$/i,
+    /^stakeholder \d+$/i,
+    /^output \d+$/i
+  ];
+  function _isGenericLabel(label) {
+    return GENERIC_LABEL_PATTERNS.some(function(p){ return p.test((label||'').trim()); });
+  }
+
+  // ── _buildAcceptedFoundation ──────────────────────────────────────────
+  // Ekstrak accepted nodes dari fase 1 sebagai anchor fase 2
+  function _buildAcceptedFoundation() {
+    var ont = activeDraft();
+    if (!ont) return null;
+
+    var allCols = ['problem_nodes','outcome_nodes'];
+    var accepted = { problems: [], outcomes: [], evidence_ids: [] };
+
+    allCols.forEach(function(col) {
+      (ont[col]||[]).forEach(function(n) {
+        if (!n) return;
+        var isAccepted = n._agent_status === 'approved' ||
+                         n._agent_status === 'accepted' ||
+                         !n._agent_status; // node tanpa status = sudah committed
+        if (!isAccepted) return;
+        var entry = {
+          id:        n.id,
+          label:     n.label || n.name || '',
+          reasoning: n._agent_reasoning || '',
+          evidence:  (n._agent_evidence || []).slice(0,3)
+        };
+        if (col === 'problem_nodes') accepted.problems.push(entry);
+        if (col === 'outcome_nodes') accepted.outcomes.push(entry);
+      });
+    });
+
+    // Kalau tidak ada yang approved, ambil semua (user belum approve tapi sudah checkpoint)
+    if (!accepted.problems.length) {
+      (ont.problem_nodes||[]).forEach(function(n){
+        if (n) accepted.problems.push({ id:n.id, label:n.label||'', reasoning:n._agent_reasoning||'' });
+      });
+    }
+    if (!accepted.outcomes.length) {
+      (ont.outcome_nodes||[]).forEach(function(n){
+        if (n) accepted.outcomes.push({ id:n.id, label:n.label||'', reasoning:n._agent_reasoning||'' });
+      });
+    }
+
+    return accepted;
+  }
+
+  // ── _buildClusterBrief ────────────────────────────────────────────────
+  // Generate build brief per cluster — kontekstual dan anchored ke fase 1
+  function _buildClusterBrief(clusterName, foundation, ctx) {
+    var master = agentState.programMaster || {};
+    var probList = foundation.problems.map(function(p){
+      return '  * ' + p.id + ': ' + p.label;
+    }).join('\n');
+    var ocList = foundation.outcomes.map(function(o){
+      return '  * ' + o.id + ': ' + o.label;
+    }).join('\n');
+
+    var header = 'PROGRAM: ' + (master.name || ctx.name || '') + '\n' +
+      'TARGET GROUP: ' + (ctx.target_group || '') + '\n' +
+      'AKTIVITAS INTI: ' + (Array.isArray(ctx.activities) ? ctx.activities.join(', ') : (ctx.activities||'')) + '\n' +
+      'LOKASI: ' + (ctx.location || '') + '\n\n' +
+      'ACCEPTED FOUNDATION FROM PHASE 1:\n' +
+      'Problem nodes:\n' + (probList || '  (belum ada)') + '\n' +
+      'Outcome nodes:\n' + (ocList || '  (belum ada)') + '\n\n';
+
+    var clusterInstructions = {
+      'activity': {
+        task: 'Bangun candidate cards untuk cluster ACTIVITY.\n' +
+          'Setiap activity node HARUS:\n' +
+          '  1. Menjawab secara langsung salah satu problem node di atas\n' +
+          '  2. Menjelaskan jalur menuju outcome yang sudah diterima\n' +
+          '  3. Menggunakan label SPESIFIK sesuai konteks program\n\n' +
+          'GOOD: "Pelatihan Perawatan Mesin Kapal dan Penggunaan Pelumas Pertamina"\n' +
+          'BAD:  "Pelatihan Keterampilan", "Pemberdayaan Usaha Mikro"\n\n' +
+          'Setiap card harus menyertakan: label spesifik, reasoning (mengapa activity ini menjawab problem tsb), ' +
+          'linked_problems[], linked_outcomes[]\n' +
+          'Panggil checkpoint() setelah selesai.',
+        ids: ['ACT-01', 'ACT-02'],
+        no_evidence: true
+      },
+      'stakeholder_beneficiary': {
+        task: 'Bangun candidate cards untuk cluster STAKEHOLDER dan BENEFICIARY.\n' +
+          'Stakeholder: pihak yang terlibat (operator, donor, mitra, pemerintah)\n' +
+          'Beneficiary: penerima manfaat langsung program\n' +
+          'Semua harus SPESIFIK terhadap program — bukan template generik.\n' +
+          'GOOD: "PT Pertamina Lubricants (operator)", "Nelayan pesisir Jawa < 5GT (penerima)"\n' +
+          'BAD:  "Stakeholder 1", "Masyarakat Umum"\n' +
+          'Panggil checkpoint() setelah selesai.',
+        ids: ['STK-01', 'STK-02', 'BEN-01'],
+        no_evidence: true
+      },
+      'output_delivery': {
+        task: 'Bangun candidate cards untuk cluster OUTPUT DELIVERY.\n' +
+          'Output adalah hasil langsung dan terukur dari activity.\n' +
+          'Harus logis sebagai hasil dari activity yang sudah dibangun.\n' +
+          'GOOD: "100 nelayan terlatih perawatan mesin kapal dengan pelumas Pertamina"\n' +
+          'BAD:  "Output 1", "Hasil Kegiatan"\n' +
+          'Panggil checkpoint() setelah selesai.',
+        ids: ['OD-01', 'OD-02'],
+        no_evidence: true
+      },
+      'baseline': {
+        task: 'Bangun candidate cards untuk cluster BASELINE.\n' +
+          'Baseline menggambarkan kondisi sebelum program berjalan.\n' +
+          'Harus spesifik dan terukur — menjadi titik pembanding untuk outcome.\n' +
+          'Panggil checkpoint() setelah selesai.',
+        ids: ['BL-01'],
+        no_evidence: true
+      },
+      'indicator': {
+        task: 'Bangun candidate cards untuk cluster INDICATOR.\n' +
+          'Setiap outcome node harus punya minimal 1 indikator terukur.\n' +
+          'Indikator harus kuantitatif dan bisa diverifikasi dari laporan program.\n' +
+          'Panggil checkpoint() setelah selesai.',
+        ids: ['IND-ECO-01', 'IND-SOC-01'],
+        no_evidence: true
+      },
+      'monetisation': {
+        task: 'Bangun candidate cards untuk cluster MONETISATION.\n' +
+          'Setiap aspek monetisasi SELALU menghasilkan DUA card:\n' +
+          '  MON-[ASPEK]-INT (dari laporan internal, placeholder angka)\n' +
+          '  MON-[ASPEK]-PRX (estimasi proxy, butuh evidence)\n' +
+          'Evidence Agent akan dipanggil dulu sebelum MON-PRX dibuat.\n' +
+          'Panggil checkpoint() setelah selesai.',
+        ids: [],
+        needs_evidence: true
+      }
+    };
+
+    var spec = clusterInstructions[clusterName] || {
+      task: 'Bangun cluster: ' + clusterName + '. Panggil checkpoint() setelah selesai.',
+      ids: [],
+      no_evidence: true
+    };
+
+    return {
+      instruction: header + 'TASK: ' + spec.task,
+      planned_ids: spec.ids,
+      needs_evidence: spec.needs_evidence || false
+    };
+  }
+
+  // ── _buildCluster ─────────────────────────────────────────────────────
+  // Build satu cluster dengan full context injection + checkpoint per cluster
+  async function _buildCluster(clusterName) {
+    var ctx        = activeCtx() || {};
+    var ont        = activeDraft();
+    var foundation = _buildAcceptedFoundation();
+
+    if (!foundation || (!foundation.problems.length && !foundation.outcomes.length)) {
+      agentAppendBubble('agent', '⚠ Tidak ada accepted foundation dari fase 1. Review dan approve problem/outcome nodes dulu sebelum lanjut ke fase 2.');
+      return;
+    }
+
+    agentUpdateModeBar('building', '🗂 ' + clusterName.toUpperCase(), 'Membangun cluster...');
+    agentLog('orchestrator', 'cluster', clusterName);
+
+    var brief = _buildClusterBrief(clusterName, foundation, ctx);
+
+    // Kalau cluster ini butuh evidence (MON-PRX) — panggil Evidence Agent dulu
+    var evidencePackets = [];
+    if (brief.needs_evidence) {
+      agentLog('orchestrator', 'evidence', 'Mencari evidence untuk ' + clusterName);
+      agentUpdateModeBar('building', '🔍 Evidence Agent', 'Mencari proxy basis...');
+      var evResult = await runEvidenceAgent({
+        type: 'proxy_basis',
+        query: 'proxy value monetization ' + (ctx.target_group||'') + ' ' + (ctx.activities||[]).join(' '),
+        node_ids: brief.planned_ids.filter(function(id){ return id.includes('PRX'); }),
+        max_per_node: 2,
+        program_context: ctx
+      });
+      evidencePackets = evResult.packets || [];
+
+      // Simpan ke run state
+      evidencePackets.forEach(function(p) {
+        if (!p.node_id) return;
+        activeRun().evidenceByNode[p.node_id] = activeRun().evidenceByNode[p.node_id] || [];
+        activeRun().evidenceByNode[p.node_id].push({
+          id: p.ref_id, title: p.title, url: p.url,
+          year: p.year, relevance_note: p.relevance
+        });
+        var o = activeDraft();
+        if (o && o.problem_context) {
+          if (!o.problem_context.references) o.problem_context.references = [];
+          if (!o.problem_context.references.find(function(r){ return r.id===p.ref_id; })) {
+            o.problem_context.references.push({ id:p.ref_id, title:p.title, url:p.url, year:p.year });
+          }
+        }
+      });
+    }
+
+    // Jalankan Mapper dengan brief yang spesifik + context penuh
+    var mapResult = await runMapperAgent({
+      type:            'build_phase2_cluster',
+      instruction:     brief.instruction,
+      evidence_packets: evidencePackets,
+      program_context:  ctx,
+      planned_nodes:   { cluster_ids: brief.planned_ids },
+      existing_nodes: {
+        problem_ids:   (ont&&ont.problem_nodes||[]).map(function(n){return n.id;}),
+        outcome_ids:   (ont&&ont.outcome_nodes||[]).map(function(n){return n.id;}),
+        activity_ids:  (ont&&ont.activity_nodes||[]).map(function(n){return n.id;}),
+        stakeholder_ids:(ont&&ont.stakeholder_nodes||[]).map(function(n){return n.id;})
+      }
+    });
+
+    // Generic label check — flag node yang labelnya generik
+    var ont2 = activeDraft();
+    var allCreated = mapResult.operations
+      .filter(function(op){ return op.tool === 'create_node'; })
+      .map(function(op){ return op.args; });
+
+    var genericFlags = allCreated.filter(function(args){
+      return _isGenericLabel(args.label || '');
+    });
+    if (genericFlags.length) {
+      genericFlags.forEach(function(args) {
+        var card = document.getElementById('anc-' + args.node_id);
+        if (card) {
+          card.style.border = '2px solid #f59e0b';
+          var badge = card.querySelector('.anc-status-badge');
+          if (badge) { badge.textContent = '⚠ Generic Label'; badge.style.background = '#fef3c7'; badge.style.color = '#92400e'; }
+        }
+      });
+      agentAppendBubble('agent',
+        '⚠ <strong>Generic Label Flag</strong>: ' + genericFlags.length + ' node menggunakan label yang terlalu generik. ' +
+        'Edit sebelum approve:\n' + genericFlags.map(function(a){ return '  • ' + a.node_id + ': "' + a.label + '"'; }).join('\n'));
+    }
+
+    agentUpdateCommitBar();
+  }
+
+  // ── _runPhase2Orchestration ───────────────────────────────────────────
+  // Entry point fase 2 — cluster-by-cluster, anchored ke fase 1
+  async function _runPhase2Orchestration() {
+    var foundation = _buildAcceptedFoundation();
+    var ctx        = activeCtx() || {};
+
+    // Guard: fase 1 harus punya foundation
+    if (!foundation || !foundation.problems.length) {
+      agentAppendBubble('agent',
+        '⚠ <strong>Fase 2 tidak bisa dimulai.</strong>\n' +
+        'Belum ada problem node yang diterima dari fase 1.\n' +
+        'Approve minimal satu problem node dan satu outcome node terlebih dahulu.');
+      agentUpdateModeBar('reviewing', 'Menunggu', 'Review fase 1 dulu');
+      return;
+    }
+
+    agentLog('orchestrator', 'phase2', 'Memulai build cluster-by-cluster');
+
+    // Tampilkan foundation summary ke user
+    var probSummary = foundation.problems.map(function(p){ return p.id + ': ' + p.label; }).join('\n');
+    var ocSummary   = foundation.outcomes.map(function(o){ return o.id + ': ' + o.label; }).join('\n');
+
+    var scroll = document.getElementById('agentChatScroll');
+    if (scroll) {
+      var div = document.createElement('div');
+      div.className = 'agent-bubble agent';
+      div.style.cssText = 'border-color:#a7f3d0;background:#f0fdf8;';
+      div.innerHTML = '<div class="agent-bubble-label" style="color:#059669;">🗂 Fase 2 — Context-Anchored Build</div>'
+        + '<div style="font-size:12px;margin-bottom:10px;">'
+        + '<strong>Foundation fase 1:</strong><br>'
+        + (probSummary + '\n' + ocSummary).replace(/\n/g,'<br>')
+        + '</div>'
+        + '<div style="font-size:12px;color:#374151;margin-bottom:10px;">Build akan dilakukan per cluster. Setiap cluster akan di-review sebelum lanjut ke cluster berikutnya.</div>'
+        + '<div style="display:flex;gap:8px;flex-wrap:wrap;">'
+        + ['activity','stakeholder_beneficiary','output_delivery','baseline','indicator','monetisation'].map(function(c){
+            return '<button onclick="agentBuildCluster(\'' + c + '\')" style="padding:6px 12px;background:white;'
+              + 'border:1.5px solid #e2e8f0;border-radius:8px;font-size:11px;font-weight:700;cursor:pointer;color:#374151;">'
+              + c.replace('_',' ').toUpperCase() + '</button>';
+          }).join('')
+        + '</div>';
+      scroll.appendChild(div);
+      scroll.scrollTop = scroll.scrollHeight;
+    }
+
+    // Auto-start dengan cluster pertama: activity
+    agentUpdateModeBar('building', 'Fase 2', 'Mulai dari cluster ACTIVITY');
+    await _buildCluster('activity');
+  }
   // Dipanggil oleh Orchestrator saat: build scenario baru, atau fingerprint berubah.
   // Return: { master, runId, programContext }
   async function _extractProgramContext(userMessage) {
@@ -7629,26 +7929,18 @@
       }
     }
 
-    // ── Shortcut: __SYSTEM__ messages langsung eksekusi tanpa planning ─
+    // ── Shortcut: __SYSTEM__: build_phase2 ───────────────────────────
+    // Tidak lagi shortcut ke Mapper — sekarang full orchestration per cluster
     if (userMessage.startsWith('__SYSTEM__:')) {
       var sysMsg = userMessage.replace('__SYSTEM__:', '').trim();
-      var isBuildPhase2 = sysMsg.includes('build_phase2');
-      var ont2 = activeDraft();
-      if (isBuildPhase2 && ont2) {
-        agentUpdateModeBar('building', '🗂 Mapper Agent', 'Build fase 2...');
-        var ctx2 = activeCtx() || {};
-        await runMapperAgent({
-          type: 'build_phase2',
-          instruction: sysMsg,
-          evidence_packets: [],
-          program_context: ctx2,
-          existing_nodes: {
-            problem_ids: (ont2.problem_nodes||[]).map(function(n){return n.id;}),
-            outcome_ids:  (ont2.outcome_nodes||[]).map(function(n){return n.id;})
-          }
-        });
-        agentUpdateModeBar('reviewing', 'Selesai', 'Review cards di kanan');
-        agentUpdateCommitBar();
+      if (sysMsg.includes('build_phase2')) {
+        await _runPhase2Orchestration();
+        return;
+      }
+      // Shortcut lain (misal build_cluster:activity) — handle di bawah
+      if (sysMsg.startsWith('build_cluster:')) {
+        var clusterName = sysMsg.replace('build_cluster:','').trim();
+        await _buildCluster(clusterName);
         return;
       }
     }
@@ -9034,6 +9326,19 @@
     if (sendBtn) { sendBtn.disabled = false; sendBtn.textContent = 'Kirim'; }
     agentUpdateCommitBar();
   }
+
+  window.agentBuildCluster = async function(clusterName) {
+    var sendBtn = document.getElementById('agentSendBtn');
+    if (sendBtn) sendBtn.disabled = true;
+    agentAppendBubble('user', '▶ Build cluster: ' + clusterName.replace('_',' '));
+    try {
+      await _buildCluster(clusterName);
+    } catch(err) {
+      agentAppendBubble('agent', '⚠ Error: ' + err.message);
+    }
+    if (sendBtn) sendBtn.disabled = false;
+    agentUpdateCommitBar();
+  };
 
   window.agentPropagateChange = function() {
     if (!activeRun().lastImpact) return;
