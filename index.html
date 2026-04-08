@@ -6468,14 +6468,24 @@
         parameters: {
           type: 'object',
           properties: {
-            collection: { type: 'string', description: 'problem_nodes | activity_nodes | stakeholder_nodes | beneficiary_nodes | output_delivery_nodes | baseline_nodes | outcome_nodes | indicator_nodes | monetisation_pre_fix_nodes | impact_adjustment_nodes | final_value_nodes | final_value_aggregates | investment_nodes | investment_aggregates' },
-            node_id:    { type: 'string', description: 'ID unik. WAJIB. Format: PROB-01, PROB-01.1, OC-ECO-01, MON-JSP-INT, MON-JSP-PRX, ADJ-JSP, dll.' },
-            label:      { type: 'string', description: 'Label singkat bahasa Indonesia. WAJIB.' },
+            collection:   { type: 'string', description: 'problem_nodes | activity_nodes | stakeholder_nodes | beneficiary_nodes | output_delivery_nodes | baseline_nodes | outcome_nodes | indicator_nodes | monetisation_pre_fix_nodes | impact_adjustment_nodes | final_value_nodes | final_value_aggregates | investment_nodes | investment_aggregates' },
+            node_id:      { type: 'string', description: 'ID unik. WAJIB.' },
+            label:        { type: 'string', description: 'Label singkat bahasa Indonesia. WAJIB.' },
             extra_fields: { type: 'object', description: 'Field tambahan sesuai collection.' },
-            reasoning:  { type: 'string', description: 'Alasan membuat node ini.' },
-            evidence_ids: { type: 'array', items: { type: 'string' }, description: 'ref_ids dari hasil search_batch_problems, search_batch_proxies, atau search_batch_ddat.' },
-            mon_source_type: { type: 'string', enum: ['internal_report','proxy'], description: 'Wajib untuk monetisation_pre_fix_nodes. internal_report = dari laporan program, proxy = dari estimasi/proksi.' },
-            mon_paired_with: { type: 'string', description: 'Untuk MON nodes: ID pasangan node (INT pasangan PRX atau sebaliknya).' }
+            reasoning:    { type: 'string', description: 'Alasan membuat node ini.' },
+            evidence_ids: { type: 'array', items: { type: 'string' }, description: 'ref_ids dari hasil search.' },
+            mon_source_type: { type: 'string', enum: ['internal_report','proxy'] },
+            mon_paired_with: { type: 'string' },
+            foundation_binding: {
+              type: 'object',
+              description: 'WAJIB untuk node fase 2 (activity, output, stakeholder, dll). Menjelaskan dari problem/outcome mana node ini berasal.',
+              properties: {
+                anchored_problems: { type: 'array', items: { type: 'string' }, description: 'IDs problem node yang dijawab oleh node ini. Contoh: ["PROB-01","PROB-01.1"]' },
+                anchored_outcomes: { type: 'array', items: { type: 'string' }, description: 'IDs outcome node yang dituju. Contoh: ["OC-ECO-01"]' },
+                binding_reasoning: { type: 'string', description: 'Penjelasan mengapa node ini relevan terhadap foundation di atas.' }
+              },
+              required: ['anchored_problems', 'binding_reasoning']
+            }
           },
           required: ['collection', 'node_id', 'label', 'reasoning']
         }
@@ -6605,15 +6615,16 @@
       type: 'function',
       function: {
         name: 'checkpoint',
-        description: 'Dipanggil setelah problem + outcome selesai. Pause dan tunggu konfirmasi human sebelum lanjut ke layer berikutnya.',
+        description: 'Dipanggil setelah selesai membangun satu cluster atau fase 1. WAJIB sertakan current_cluster kalau sedang build fase 2.',
         parameters: {
           type: 'object',
           properties: {
-            summary:        { type: 'string' },
-            problems_built: { type: 'array', items: { type: 'string' } },
-            outcomes_built: { type: 'array', items: { type: 'string' } }
+            summary:         { type: 'string', description: 'Ringkasan apa yang telah dibuat.' },
+            current_cluster: { type: 'string', description: 'WAJIB untuk fase 2: nama cluster yang baru selesai. Contoh: "activity", "stakeholder_beneficiary", "output_delivery", "baseline", "indicator", "monetisation".' },
+            problems_built:  { type: 'array', items: { type: 'string' }, description: 'Untuk fase 1: IDs problem nodes yang dibuat.' },
+            outcomes_built:  { type: 'array', items: { type: 'string' }, description: 'Untuk fase 1: IDs outcome nodes yang dibuat.' }
           },
-          required: ['summary', 'problems_built', 'outcomes_built']
+          required: ['summary']
         }
       }
     },
@@ -6890,75 +6901,86 @@
       }
 
       case 'checkpoint': {
-        var run       = activeRun();
-        var progress  = run && run.buildProgress;
-        var ont       = activeDraft();
-        var cluster   = run && run.activeCluster; // null = fase 1
+        var run      = activeRun();
+        var progress = run && run.buildProgress;
+        var ont      = activeDraft();
+
+        // Fix D: pakai args.current_cluster DULU, fallback ke run.activeCluster
+        var cluster = args.current_cluster || (run && run.activeCluster) || null;
 
         activeRun().opLog.push({ id: opId, tool: 'checkpoint', summary: args.summary, cluster: cluster });
 
         // ── Guard 3: Completion validation ──────────────────────────────
         var completionWarnings = [];
+        var failedNodes = [];
         if (cluster && CLUSTER_COMPLETION_RULES[cluster]) {
           var rule = CLUSTER_COMPLETION_RULES[cluster];
           rule.collections.forEach(function(col) {
             var nodes = (ont && ont[col] || []).filter(function(n){
-              return n && n._candidate_status === 'pending_review';
+              return n && (n._candidate_status === 'pending_review' || n._candidate_status === 'accepted');
             });
-            if (nodes.length < (rule.min_nodes / rule.collections.length)) {
-              completionWarnings.push('Cluster "' + cluster + '" kurang node di ' + col + ' (min: ' + rule.min_nodes + ')');
+            if (nodes.length < 1) {
+              completionWarnings.push('Cluster "' + cluster + '" tidak punya node di ' + col);
             }
-            // Cek foundation binding
             var missingBinding = nodes.filter(function(n){
-              return !n._foundation_binding || !n._foundation_binding.anchored_problems || !n._foundation_binding.anchored_problems.length;
+              return !n._foundation_binding ||
+                     !n._foundation_binding.anchored_problems ||
+                     !n._foundation_binding.anchored_problems.length;
             });
             if (missingBinding.length) {
-              completionWarnings.push(missingBinding.length + ' node tanpa foundation binding di cluster ' + cluster);
+              missingBinding.forEach(function(n){ failedNodes.push(n.id); });
+              completionWarnings.push(missingBinding.length + ' node tanpa foundation binding: '
+                + missingBinding.map(function(n){ return n.id; }).join(', '));
             }
           });
         }
 
-        // ── Update cluster progress — clusterState sebagai source of truth ──
+        var hasValidationFailure = completionWarnings.length > 0;
+
+        // ── Update clusterState — source of truth ────────────────────────
         if (cluster && run) {
-          // 1. Update clusterState DULU sebelum apapun
-          if (run.clusterState) {
-            run.clusterState[cluster] = completionWarnings.length ? 'completed_with_warnings' : 'completed';
+          if (hasValidationFailure) {
+            // Fix E: blocked_validation — jangan izinkan loop rebuild
+            if (run.clusterState) run.clusterState[cluster] = 'blocked_validation';
+            run.buildProgress.current_cluster = null;
+            // next_cluster TIDAK diupdate — tetap ke cluster yg blocked agar getNextIncomplete return ini
+            run.activeCluster = null;
+          } else {
+            if (run.clusterState) run.clusterState[cluster] = 'completed';
+            var nextFromState = getNextIncompleteCluster(run.clusterState);
+            run.buildProgress.next_cluster    = nextFromState;
+            run.buildProgress.current_cluster = null;
+            run.activeCluster = null;
           }
-
-          // 2. Hitung next_cluster dari clusterState (bukan dari index manual)
-          var nextFromState = getNextIncompleteCluster(run.clusterState);
-          run.buildProgress.next_cluster    = nextFromState;
-          run.buildProgress.current_cluster = null;
-
-          // 3. Clear activeCluster SETELAH semua update selesai
-          run.activeCluster = null;
-
-        } else if (!cluster) {
-          // Fase 1 checkpoint — tidak ada cluster state yang perlu diupdate
         }
 
         agentState.mode = 'reviewing';
-        agentUpdateModeBar('reviewing', cluster ? 'Checkpoint — ' + cluster.toUpperCase() : 'Checkpoint — Fase 1', args.summary || '');
+        agentUpdateModeBar('reviewing',
+          cluster ? 'Checkpoint — ' + cluster.replace(/_/g,' ').toUpperCase() : 'Checkpoint — Fase 1',
+          hasValidationFailure ? 'Perlu perbaikan' : (args.summary || ''));
 
         // ── Render checkpoint card ───────────────────────────────────────
         var scroll = document.getElementById('agentChatScroll');
         if (scroll) {
           var ckDiv = document.createElement('div');
+          var isBlocked = hasValidationFailure && cluster;
           ckDiv.className = 'agent-bubble agent';
-          ckDiv.style.cssText = 'border:1.5px solid #a7f3d0;background:#f0fdf8;';
+          ckDiv.style.cssText = isBlocked
+            ? 'border:1.5px solid #fca5a5;background:#fef2f2;'
+            : 'border:1.5px solid #a7f3d0;background:#f0fdf8;';
 
-          // Cluster progress bar — baca dari run.clusterState
+          // Progress bar
           var progressBar = '';
           if (cluster && run && run.clusterState) {
             progressBar = '<div style="display:flex;gap:4px;margin-bottom:10px;">';
             PHASE2_CLUSTER_ORDER.forEach(function(c) {
-              var st    = run.clusterState[c] || 'pending';
-              var color = st === 'completed' ? '#059669'
-                        : st === 'completed_with_warnings' ? '#d97706'
-                        : st === 'in_progress' ? '#2563eb'
+              var st = run.clusterState[c] || 'pending';
+              var color = st === 'completed'          ? '#059669'
+                        : st === 'blocked_validation' ? '#dc2626'
+                        : st === 'in_progress'        ? '#2563eb'
                         : '#e2e8f0';
-              var txtColor = st === 'pending' ? '#94a3b8' : 'white';
-              var lbl   = c.replace(/_/g,' ').replace('stakeholder beneficiary','stk+ben');
+              var txtColor = (st === 'pending') ? '#94a3b8' : 'white';
+              var lbl = c.replace(/_/g,' ').replace('stakeholder beneficiary','stk+ben');
               progressBar += '<div style="flex:1;padding:3px 4px;background:' + color
                 + ';border-radius:4px;font-size:9px;color:' + txtColor
                 + ';text-align:center;font-weight:700;">' + lbl + '</div>';
@@ -6973,39 +6995,64 @@
           if (cluster) {
             var allowedCols2 = CLUSTER_ALLOWED_COLLECTIONS[cluster] || [];
             var clusterNodeCount = allowedCols2.reduce(function(sum, col2) {
-              return sum + (ont && ont[col2] || []).filter(function(n){ return n && n._candidate_status === 'pending_review'; }).length;
+              return sum + (ont && ont[col2] || []).filter(function(n){
+                return n && (n._candidate_status === 'pending_review' || n._candidate_status === 'accepted');
+              }).length;
             }, 0);
-            clusterStats = '<strong>' + clusterNodeCount + '</strong> candidate cards untuk cluster <strong>' + cluster.replace(/_/g,' ').toUpperCase() + '</strong>';
+            clusterStats = '<strong>' + clusterNodeCount + '</strong> candidate cards untuk cluster <strong>'
+              + cluster.replace(/_/g,' ').toUpperCase() + '</strong>';
           } else {
             clusterStats = '<strong>' + probCount + '</strong> problem nodes · <strong>' + ocCount + '</strong> outcome nodes';
           }
 
-          // Warnings
-          var warningHtml = completionWarnings.length
-            ? '<div style="margin:8px 0;padding:8px;background:#fffbeb;border-radius:6px;">'
-              + completionWarnings.map(function(w){ return '⚠ ' + esc(w); }).join('<br>')
-              + '</div>' : '';
+          // Warnings + failed nodes
+          var warningHtml = '';
+          if (completionWarnings.length) {
+            warningHtml = '<div style="margin:8px 0;padding:10px;background:#fef2f2;border-radius:6px;border:1px solid #fca5a5;">'
+              + '<div style="font-weight:700;color:#dc2626;margin-bottom:4px;">⛔ Validasi Gagal</div>'
+              + completionWarnings.map(function(w){ return '<div style="font-size:12px;color:#dc2626;">• ' + esc(w) + '</div>'; }).join('')
+              + (failedNodes.length ? '<div style="font-size:11px;color:#7f1d1d;margin-top:4px;">Node bermasalah: ' + failedNodes.map(function(id){ return esc(id); }).join(', ') + '</div>' : '')
+              + '</div>';
+          }
 
-          // Next cluster button — ambil dari run.buildProgress.next_cluster (sudah diupdate dari clusterState)
-          var nextClusterBtn = run && run.buildProgress && run.buildProgress.next_cluster;
-          var nextBtn = nextClusterBtn
-            ? '<button onclick="agentBuildCluster(\'' + nextClusterBtn + '\')" style="padding:7px 16px;background:#059669;color:white;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;">▶ Lanjut: ' + nextClusterBtn.replace(/_/g,' ').toUpperCase() + '</button>'
-            : '<button onclick="agentRunQA()" style="padding:7px 16px;background:#2563eb;color:white;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;">✅ Semua selesai — Jalankan QA</button>';
+          // Tombol aksi
+          var actionBtns = '';
+          if (isBlocked) {
+            actionBtns = '<button onclick="agentBuildCluster(\'' + cluster + '\')" '
+              + 'style="padding:7px 16px;background:#dc2626;color:white;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;">'
+              + '🔧 Perbaiki ' + cluster.replace(/_/g,' ').toUpperCase() + '</button>';
+          } else {
+            var nextClusterBtn = run && run.buildProgress && run.buildProgress.next_cluster;
+            actionBtns = nextClusterBtn
+              ? '<button onclick="agentBuildCluster(\'' + nextClusterBtn + '\')" '
+                + 'style="padding:7px 16px;background:#059669;color:white;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;">'
+                + '▶ Lanjut: ' + nextClusterBtn.replace(/_/g,' ').toUpperCase() + '</button>'
+              : '<button onclick="agentRunQA()" '
+                + 'style="padding:7px 16px;background:#2563eb;color:white;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;">'
+                + '✅ Semua selesai — Jalankan QA</button>';
+          }
           var qaBtn = '<button onclick="agentRunQA()" style="padding:7px 16px;background:#f8fafc;color:#374151;border:1.5px solid #e2e8f0;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;">🔍 QA</button>';
 
-          ckDiv.innerHTML = '<div class="agent-bubble-label" style="color:#059669;">✅ Checkpoint' + (cluster ? ' — ' + cluster.replace('_',' ').toUpperCase() : '') + '</div>'
+          var headerColor = isBlocked ? '#dc2626' : '#059669';
+          var headerText  = isBlocked
+            ? '⛔ Checkpoint — ' + (cluster||'').replace(/_/g,' ').toUpperCase() + ' (Validasi Gagal)'
+            : '✅ Checkpoint' + (cluster ? ' — ' + cluster.replace(/_/g,' ').toUpperCase() : '');
+
+          ckDiv.innerHTML = '<div class="agent-bubble-label" style="color:' + headerColor + ';">' + headerText + '</div>'
             + progressBar
             + '<div style="font-size:13px;margin-bottom:8px;">' + clusterStats + '</div>'
-            + (args.summary ? '<div style="font-size:12px;color:#374151;margin-bottom:6px;">' + esc(args.summary) + '</div>' : '')
+            + (args.summary && !isBlocked ? '<div style="font-size:12px;color:#374151;margin-bottom:6px;">' + esc(args.summary) + '</div>' : '')
             + warningHtml
-            + '<div style="font-size:12px;color:#374151;margin-bottom:10px;">Review candidate cards di kanan sebelum lanjut.</div>'
-            + '<div style="display:flex;gap:8px;flex-wrap:wrap;">' + nextBtn + qaBtn + '</div>';
+            + '<div style="font-size:12px;color:#374151;margin-bottom:10px;">'
+            + (isBlocked ? 'Perbaiki node yang bermasalah sebelum lanjut.' : 'Review candidate cards di kanan sebelum lanjut.')
+            + '</div>'
+            + '<div style="display:flex;gap:8px;flex-wrap:wrap;">' + actionBtns + qaBtn + '</div>';
 
           scroll.appendChild(ckDiv);
           scroll.scrollTop = scroll.scrollHeight;
         }
 
-        return { success: true, awaiting_human: true };
+        return { success: true, awaiting_human: true, cluster_status: hasValidationFailure ? 'blocked_validation' : 'completed' };
       }
 
       case 'delete_node': {
@@ -7570,21 +7617,24 @@
       'OUTPUT: Hanya tool calls.\n\n' +
       'ATURAN LABEL — WAJIB:\n' +
       '- Label HARUS spesifik terhadap konteks program yang diberikan\n' +
-      '- DILARANG menggunakan label generik seperti:\n' +
-      '  "Pelatihan Keterampilan", "Pemberdayaan Usaha Mikro",\n' +
-      '  "Peningkatan Kapasitas", "Kegiatan Sosial", "Activity 1"\n' +
+      '- DILARANG: "Pelatihan Keterampilan", "Pemberdayaan Usaha Mikro", "Peningkatan Kapasitas", "Activity 1"\n' +
       '- Setiap label harus menyebut SIAPA, MELAKUKAN APA, UNTUK APA\n' +
-      '- Contoh BENAR: "Pelatihan Perawatan Mesin Kapal dan Penggunaan Pelumas Pertamina"\n' +
-      '- Contoh SALAH: "Pelatihan Keterampilan"\n\n' +
-      'ATURAN ANCHOR:\n' +
-      '- Activity harus menjawab problem yang ada di instruksi\n' +
-      '- Output harus logis sebagai hasil activity\n' +
-      '- Stakeholder harus spesifik ke program, bukan template\n\n' +
+      '- Contoh BENAR: "Pelatihan Perawatan Mesin Kapal dan Penggunaan Pelumas Pertamina"\n\n' +
+      'ATURAN FOUNDATION BINDING — WAJIB untuk semua node fase 2:\n' +
+      '- SETIAP create_node untuk activity/output/stakeholder/beneficiary/baseline/indicator WAJIB punya foundation_binding\n' +
+      '- Format:\n' +
+      '    foundation_binding: {\n' +
+      '      anchored_problems: ["PROB-01", "PROB-01.1"],\n' +
+      '      anchored_outcomes: ["OC-ECO-01"],\n' +
+      '      binding_reasoning: "Node ini menjawab PROB-01.1 karena..."\n' +
+      '    }\n' +
+      '- JANGAN buat node fase 2 tanpa foundation_binding — akan ditolak validator\n\n' +
+      'ATURAN CHECKPOINT — WAJIB:\n' +
+      '- Saat memanggil checkpoint() di fase 2, SELALU sertakan current_cluster\n' +
+      '- Contoh: checkpoint(summary:"3 activity nodes dibuat", current_cluster:"activity")\n' +
+      '- Tanpa current_cluster, sistem tidak bisa update progress dan akan loop\n\n' +
       'ATURAN MON:\n' +
-      '- Selalu buat PASANGAN: MON-[ASPEK]-INT + MON-[ASPEK]-PRX\n' +
-      '- INT: mon_source_type:"internal_report", mon_paired_with:"MON-[ASPEK]-PRX"\n' +
-      '- PRX: mon_source_type:"proxy", mon_paired_with:"MON-[ASPEK]-INT"\n\n' +
-      'SETELAH SELESAI: panggil checkpoint()\n\n' +
+      '- Selalu buat PASANGAN: MON-[ASPEK]-INT + MON-[ASPEK]-PRX\n\n' +
       'SCHEMA:\n' + schema + evidenceCtx + plannedCtx + existingCtx;
 
     // Mapper pakai tool_choice: required — wajib panggil tools, tidak boleh ngobrol
