@@ -8986,12 +8986,7 @@
     if (sendBtn) { sendBtn.disabled = true; sendBtn.textContent = '...'; }
     agentUpdateModeBar('building', 'Membangun', 'Agent sedang bekerja...');
     try {
-      // Pertama kali: parse input untuk set inputContext
-      if (!agentState.inputContext.program_title) {
-        agentState.inputContext.program_title = text.split(/[\n\-—]/)[0].trim();
-        agentState.inputContext.activities = text;
-      }
-      await agentCallGPT(text); // search evidence dilakukan terpisah via agentSearchEvidence()
+      await agentCallGPT(text);
     } catch(err) {
       agentAppendBubble('agent', '⚠ Error: ' + err.message);
       agentUpdateModeBar('idle', 'Error', err.message);
