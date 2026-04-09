@@ -7620,6 +7620,21 @@
       '- DILARANG: "Pelatihan Keterampilan", "Pemberdayaan Usaha Mikro", "Peningkatan Kapasitas", "Activity 1"\n' +
       '- Setiap label harus menyebut SIAPA, MELAKUKAN APA, UNTUK APA\n' +
       '- Contoh BENAR: "Pelatihan Perawatan Mesin Kapal dan Penggunaan Pelumas Pertamina"\n\n' +
+      'ATURAN VULNERABILITY ANCHOR — WAJIB untuk setiap problem_node:\n' +
+      '- Setiap create_node untuk problem_nodes WAJIB menyertakan vulnerability_anchor di extra_fields\n' +
+      '- Format:\n' +
+      '    extra_fields: {\n' +
+      '      ...\n' +
+      '      vulnerability_anchor: {\n' +
+      '        tagline_en: "short academic term in English (e.g. income vulnerability, livelihood insecurity)",\n' +
+      '        label_id: "judul kerentanan dalam bahasa Indonesia",\n' +
+      '        summary: "satu kalimat framing kerentanan langsung dari perspektif SROI",\n' +
+      '        dimensions: ["F", "H"],  // maks 2: N=Natural P=Physical H=Human S=Social F=Financial\n' +
+      '        narrative: "paragraf akademik 50-100 kata tentang kerentanan ini dalam konteks program"\n' +
+      '      }\n' +
+      '    }\n' +
+      '- JANGAN buat problem_node tanpa vulnerability_anchor — akan di-flag error oleh QA\n' +
+      '- Gunakan evidence yang tersedia untuk memperkuat narrative\n\n' +
       'ATURAN FOUNDATION BINDING — WAJIB untuk semua node fase 2:\n' +
       '- SETIAP create_node untuk activity/output/stakeholder/beneficiary/baseline/indicator WAJIB punya foundation_binding\n' +
       '- Format:\n' +
@@ -7633,6 +7648,11 @@
       '- Saat memanggil checkpoint() di fase 2, SELALU sertakan current_cluster\n' +
       '- Contoh: checkpoint(summary:"3 activity nodes dibuat", current_cluster:"activity")\n' +
       '- Tanpa current_cluster, sistem tidak bisa update progress dan akan loop\n\n' +
+      'ATURAN RELASI OUTPUT DELIVERY — WAJIB:\n' +
+      '- Setelah membuat output_delivery_nodes, WAJIB panggil link_nodes:\n' +
+      '    link_nodes(relation_key:"output_delivery_to_outcome", from_id:"OD-01", to_ids:["OC-ECO-01","OC-SOC-01"])\n' +
+      '- Setiap output_delivery node HARUS terhubung ke minimal 1 outcome node\n' +
+      '- Tanpa relasi ini, chain SROI putus dan QA akan flag error\n\n' +
       'ATURAN MON:\n' +
       '- Selalu buat PASANGAN: MON-[ASPEK]-INT + MON-[ASPEK]-PRX\n\n' +
       'SCHEMA:\n' + schema + evidenceCtx + plannedCtx + existingCtx;
@@ -7854,9 +7874,9 @@
           '  3. Menggunakan label SPESIFIK sesuai konteks program\n\n' +
           'GOOD: "Pelatihan Perawatan Mesin Kapal dan Penggunaan Pelumas Pertamina"\n' +
           'BAD:  "Pelatihan Keterampilan", "Pemberdayaan Usaha Mikro"\n\n' +
-          'Setiap card harus menyertakan: label spesifik, reasoning (mengapa activity ini menjawab problem tsb), ' +
-          'linked_problems[], linked_outcomes[]\n' +
-          'Panggil checkpoint() setelah selesai.',
+          'WAJIB: panggil link_nodes(relation_key:"problem_to_activity") untuk setiap activity.\n' +
+          'Setiap card harus menyertakan: foundation_binding dengan anchored_problems dan anchored_outcomes.\n' +
+          'Panggil checkpoint(summary:"...", current_cluster:"activity") setelah selesai.',
         ids: ['ACT-01', 'ACT-02'],
         no_evidence: true
       },
@@ -7876,8 +7896,12 @@
           'Output adalah hasil langsung dan terukur dari activity.\n' +
           'Harus logis sebagai hasil dari activity yang sudah dibangun.\n' +
           'GOOD: "100 nelayan terlatih perawatan mesin kapal dengan pelumas Pertamina"\n' +
-          'BAD:  "Output 1", "Hasil Kegiatan"\n' +
-          'Panggil checkpoint() setelah selesai.',
+          'BAD:  "Output 1", "Hasil Kegiatan"\n\n' +
+          'WAJIB setelah create_node output_delivery:\n' +
+          '  link_nodes(relation_key:"output_delivery_to_outcome", from_id:"OD-01", to_ids:["OC-ECO-01","OC-SOC-01"])\n' +
+          'Setiap output_delivery node HARUS terhubung ke outcome yang relevan.\n' +
+          'Tanpa relasi ini, chain SROI putus dan tidak bisa commit.\n' +
+          'Panggil checkpoint(summary:"...", current_cluster:"output_delivery") setelah selesai.',
         ids: ['OD-01', 'OD-02'],
         no_evidence: true
       },
@@ -8511,27 +8535,73 @@
       (ont.problem_nodes||[]).forEach(function(n) {
         if (!n) return;
         if (!n.label && !n.description) flags.push({ node_id: n.id, severity: 'error', message: 'Problem node tidak punya label atau description' });
-        if (!n.vulnerability_anchor) flags.push({ node_id: n.id, severity: 'warning', message: 'Tidak ada vulnerability_anchor' });
+
+        // Sprint 1A: vulnerability_anchor naik ke error (bukan warning)
+        if (!n.vulnerability_anchor) {
+          flags.push({ node_id: n.id, severity: 'error', message: 'vulnerability_anchor wajib diisi — dasar defensibility SROI' });
+        } else {
+          // Validasi isi minimum anchor
+          var va = n.vulnerability_anchor;
+          if (!va.tagline_en) flags.push({ node_id: n.id, severity: 'warning', message: 'vulnerability_anchor.tagline_en kosong' });
+          if (!va.label_id)   flags.push({ node_id: n.id, severity: 'warning', message: 'vulnerability_anchor.label_id kosong' });
+          if (!va.summary)    flags.push({ node_id: n.id, severity: 'warning', message: 'vulnerability_anchor.summary kosong' });
+          if (!va.dimensions || !va.dimensions.length) flags.push({ node_id: n.id, severity: 'warning', message: 'vulnerability_anchor.dimensions kosong (gunakan N/P/H/S/F)' });
+        }
+
         if (!(n._agent_evidence && n._agent_evidence.length)) flags.push({ node_id: n.id, severity: 'warning', message: 'Tidak ada evidence — wajib untuk problem node' });
       });
     }
     if (scope === 'full' || scope === 'monetisation') {
       (ont.monetisation_pre_fix_nodes||[]).forEach(function(mn) {
         if (!mn) return;
-        if (!mn.net_multiplier) flags.push({ node_id: mn.id, severity: 'error', message: 'net_multiplier kosong' });
-        if (!(mn._agent_evidence && mn._agent_evidence.length) && mn.proxy_basis) flags.push({ node_id: mn.id, severity: 'warning', message: 'MON node berbasis proxy tanpa evidence' });
+        // net_multiplier hanya wajib untuk PRX nodes (internal_report boleh kosong)
+        if (mn._mon_source_type === 'proxy' && !mn.net_multiplier) {
+          flags.push({ node_id: mn.id, severity: 'error', message: 'net_multiplier kosong — wajib untuk MON proxy node' });
+        } else if (!mn._mon_source_type && !mn.net_multiplier) {
+          flags.push({ node_id: mn.id, severity: 'warning', message: 'net_multiplier kosong' });
+        }
+        if (!(mn._agent_evidence && mn._agent_evidence.length) && mn._mon_source_type === 'proxy') {
+          flags.push({ node_id: mn.id, severity: 'warning', message: 'MON proxy node tanpa evidence' });
+        }
         var ver = activeRun().pendingVerifications.find(function(v){ return v.node_id === mn.id && v.status === 'pending'; });
         if (ver) flags.push({ node_id: mn.id, severity: 'info', message: 'Menunggu verifikasi: ' + ver.question });
       });
     }
     if (scope === 'full' || scope === 'relations') {
-      // Cek outcome nodes punya upstream
+      var ri2 = ont.relation_index || {};
+
+      // Sprint 1B: Hard rule — outcome wajib punya upstream output_delivery
       (ont.outcome_nodes||[]).forEach(function(oc) {
         if (!oc) return;
         var hasUpstream = false;
-        var odMap = ri.output_delivery_to_outcome || {};
+        var odMap = ri2.output_delivery_to_outcome || {};
         Object.values(odMap).forEach(function(arr){ if(arr.indexOf(oc.id)!==-1) hasUpstream=true; });
-        if (!hasUpstream) flags.push({ node_id: oc.id, severity: 'warning', message: 'Outcome tidak punya upstream output_delivery' });
+        if (!hasUpstream) flags.push({
+          node_id: oc.id,
+          severity: 'error',  // naik dari warning ke error
+          message: 'Chain putus: outcome tidak punya upstream output_delivery. Wajib ada relasi output_delivery_to_outcome.'
+        });
+      });
+
+      // Hard rule — monetisation tidak boleh committed jika chain outcome masih bolong
+      var hasChainError = flags.some(function(f){
+        return f.severity === 'error' && f.message.includes('Chain putus');
+      });
+      if (hasChainError && (ont.monetisation_pre_fix_nodes||[]).length > 0) {
+        flags.push({
+          node_id: 'CHAIN',
+          severity: 'error',
+          message: 'Monetisation nodes ada tapi chain outcome→output_delivery belum lengkap. Perbaiki chain sebelum commit.'
+        });
+      }
+
+      // Cek activity nodes punya downstream output
+      (ont.activity_nodes||[]).forEach(function(act) {
+        if (!act) return;
+        var hasOutput = false;
+        var actOutMap = ri2.activity_to_output_delivery || ri2.activity_to_output || {};
+        if (actOutMap[act.id] && actOutMap[act.id].length) hasOutput = true;
+        if (!hasOutput) flags.push({ node_id: act.id, severity: 'warning', message: 'Activity tidak punya downstream output_delivery' });
       });
     }
     if (scope === 'full' || scope === 'fva') {
