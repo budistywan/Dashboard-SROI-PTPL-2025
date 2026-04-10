@@ -6314,7 +6314,9 @@
     'output_delivery',
     'baseline',
     'indicator',
-    'monetisation'
+    'monetisation',
+    'adj_ddat',      // Sprint 2A: DDAT adjustment per aspek
+    'final_value'    // Sprint 2B: Final Value + FVA
   ];
 
   // Allowed collections per cluster — Guard 1
@@ -6324,7 +6326,9 @@
     'output_delivery':        ['output_delivery_nodes'],
     'baseline':               ['baseline_nodes'],
     'indicator':              ['indicator_nodes'],
-    'monetisation':           ['monetisation_pre_fix_nodes', 'impact_adjustment_nodes', 'final_value_nodes', 'final_value_aggregates']
+    'monetisation':           ['monetisation_pre_fix_nodes'],
+    'adj_ddat':               ['impact_adjustment_nodes'],
+    'final_value':            ['final_value_nodes', 'final_value_aggregates']
   };
 
   // Completion rules per cluster — Guard 3
@@ -6334,7 +6338,9 @@
     'output_delivery':        { min_nodes: 1, collections: ['output_delivery_nodes'] },
     'baseline':               { min_nodes: 1, collections: ['baseline_nodes'] },
     'indicator':              { min_nodes: 1, collections: ['indicator_nodes'] },
-    'monetisation':           { min_nodes: 2, collections: ['monetisation_pre_fix_nodes'] }
+    'monetisation':           { min_nodes: 2, collections: ['monetisation_pre_fix_nodes'] },
+    'adj_ddat':               { min_nodes: 1, collections: ['impact_adjustment_nodes'] },
+    'final_value':            { min_nodes: 1, collections: ['final_value_nodes'] }
   };
 
   // Helper: cari cluster berikutnya yang belum completed
@@ -6710,6 +6716,37 @@
         data._agent_status    = 'draft';
         data._agent_reasoning = args.reasoning || '';
         data._agent_evidence  = args.evidence_ids || [];
+
+        // Sprint 2A: Auto-kalkulasi net_multiplier untuk impact_adjustment_nodes
+        if (col === 'impact_adjustment_nodes' && data.attribution !== undefined) {
+          var dw = parseFloat(data.deadweight   || 0);
+          var at = parseFloat(data.attribution  || 0);
+          var ds = parseFloat(data.displacement || 0);
+          var do_ = parseFloat(data.drop_off    || 0);
+          var nm = at * (1 - dw) * (1 - ds) * (1 - do_);
+          data.net_multiplier = Math.round(nm * 1000000) / 1000000; // 6 desimal
+          data.multiplier_formula_trace = at + ' * (1-' + dw + ') * (1-' + ds + ') * (1-' + do_ + ')';
+
+          // Auto-update MON-PRX yang terkait
+          if (data.source_monetisation_id) {
+            var monOnt = activeDraft();
+            var monNode = monOnt && (monOnt.monetisation_pre_fix_nodes||[])
+              .find(function(n){ return n && n.id === data.source_monetisation_id; });
+            if (monNode) {
+              monNode.net_multiplier = data.net_multiplier;
+              // Re-render card MON-PRX
+              var monCol = 'monetisation_pre_fix_nodes';
+              setTimeout(function() {
+                agentRenderCard(monNode.id, monCol, monNode, monNode._agent_reasoning, monNode._agent_evidence_objects || []);
+              }, 100);
+            }
+          }
+        }
+
+        // Sprint 2B: Auto-kalkulasi net_value_computed untuk final_value_nodes
+        if (col === 'final_value_nodes' && data.gross_value !== undefined && data.net_multiplier !== undefined) {
+          data.net_value_computed = Math.round(parseFloat(data.gross_value) * parseFloat(data.net_multiplier));
+        }
 
         // Guard 4: candidate_status
         // Fase 1 (activeCluster null): pending_review — user masih bisa edit sebelum lanjut
@@ -7431,6 +7468,10 @@
   // Meniru gaya reasoning: claim → problem context → verification intent
   async function _generateEvidenceQuery(rawQuery, purpose, nodeIds, programContext) {
     var ctx = programContext || activeCtx() || {};
+    var tg  = ctx.target_group || 'target group';
+    var acts = Array.isArray(ctx.activities) ? ctx.activities.join(', ') : (ctx.activities || '');
+    var loc  = ctx.location || 'Indonesia';
+
     var purposeInstructions = {
       'problem_framing':
         'Kamu membantu researcher SROI memvalidasi bahwa masalah sosial-ekonomi benar-benar ada di lapangan.\n' +
@@ -7442,15 +7483,49 @@
         'JANGAN gunakan label abstrak seperti "peer-reviewed empirical study".',
 
       'proxy_basis':
-        'Kamu mencari dasar numerik untuk monetisasi manfaat (proxy value SROI).\n' +
-        'Formula: "average [variabel ekonomi spesifik] for [kelompok sasaran] in Indonesia"\n' +
-        'Fokus: angka rata-rata, statistik resmi, data yang bisa dijadikan proxy.\n' +
-        'Sumber prioritas: BPS, Kementerian, laporan lembaga resmi, jurnal dengan data lapangan.',
+        'Kamu mencari dasar NUMERIK untuk monetisasi manfaat program (proxy value SROI).\n' +
+        'Target group program: ' + tg + '\n' +
+        'Mekanisme program: ' + acts + '\n' +
+        'Lokasi: ' + loc + '\n\n' +
+        'Formula query: "[claimed economic change] + [target group] + [program mechanism] + [Indonesia/context]"\n\n' +
+        'TIPE QUERY YANG HARUS DIHASILKAN:\n' +
+        'Untuk efisiensi/penghematan biaya:\n' +
+        '  "average boat engine maintenance cost fishermen Indonesia"\n' +
+        '  "cost saving from local access to boat repair services Indonesia"\n' +
+        '  "average fuel/lubricant expenditure fishermen coastal Indonesia"\n' +
+        'Untuk peningkatan pendapatan:\n' +
+        '  "income increase after marine engine maintenance training Indonesia"\n' +
+        '  "revenue small marine workshop Indonesia"\n' +
+        '  "income uplift vocational training fishermen Indonesia"\n' +
+        'Untuk keterampilan/kewirausahaan:\n' +
+        '  "returns to technical training fishermen Indonesia"\n' +
+        '  "income effect workshop ownership marine repair services"\n\n' +
+        'JANGAN gunakan: "proxy value monetization", "average income for farmers", "healthcare cost elderly"\n' +
+        'Query WAJIB mengandung target group dan konteks program aktif.',
 
       'ddat_justification':
-        'Kamu mencari justifikasi empiris untuk faktor DDAT.\n' +
-        'Formula: "external factors affecting [outcome spesifik] in [konteks program] Indonesia"\n' +
-        'JANGAN cari frasa metodologis abstrak — cari faktor kontekstual nyata.',
+        'Kamu mencari bukti substantif untuk justifikasi faktor DDAT.\n' +
+        'Target group program: ' + tg + '\n' +
+        'Mekanisme program: ' + acts + '\n' +
+        'Lokasi: ' + loc + '\n\n' +
+        'JANGAN mulai dari istilah metodologis. Mulai dari pertanyaan substantif:\n\n' +
+        'Untuk DEADWEIGHT (apa yang terjadi tanpa program?):\n' +
+        '  Formula: "other factors that could improve [outcome] for [target group] in Indonesia without program"\n' +
+        '  Contoh: "existing access to boat repair engine maintenance services coastal Indonesia"\n' +
+        '  Contoh: "market factors affecting fishermen operational efficiency Indonesia"\n\n' +
+        'Untuk ATTRIBUTION (siapa lagi yang menyumbang outcome?):\n' +
+        '  Formula: "other programs or actors affecting [outcome] for [target group] in Indonesia"\n' +
+        '  Contoh: "other programs affecting fishermen technical skills Indonesia"\n' +
+        '  Contoh: "government fisheries assistance affecting coastal livelihood Indonesia"\n\n' +
+        'Untuk DISPLACEMENT (apakah manfaat menggeser pihak lain?):\n' +
+        '  Formula: "possible displacement effects of [mechanism] on existing actors in [sector]"\n' +
+        '  Contoh: "displacement effects local marine workshops on existing repair businesses Indonesia"\n\n' +
+        'Untuk DROP-OFF (apakah dampak bertahan?):\n' +
+        '  Formula: "sustainability or decline over time of [outcome] for [target group]"\n' +
+        '  Contoh: "sustainability technical training outcomes fishermen Indonesia"\n' +
+        '  Contoh: "long-term retention mechanical training small-scale fishermen"\n\n' +
+        'JANGAN gunakan: "deadweight attribution drop-off impact evaluation journal"\n' +
+        'Istilah metodologis hanya sebagai pelengkap, bukan inti query.',
 
       'revision':
         'Cari referensi tambahan untuk memperkuat node yang sudah ada.\n' +
@@ -7465,10 +7540,10 @@
     if (ctx.name || ctx.target_group) {
       ctxStr = '\nPROGRAM CONTEXT:\n' +
         '- Program: ' + (ctx.name || '') + '\n' +
-        '- Target group: ' + (ctx.target_group || '') + '\n' +
-        '- Location: ' + (ctx.location || 'Indonesia') + '\n' +
+        '- Target group: ' + tg + '\n' +
+        '- Location: ' + loc + '\n' +
         '- Year: ' + (ctx.year || '') + '\n' +
-        '- Activities: ' + (Array.isArray(ctx.activities) ? ctx.activities.join(', ') : (ctx.activities||'')) + '\n';
+        '- Activities: ' + acts + '\n';
     }
 
     var nodeCtx = nodeIds && nodeIds.length
@@ -7476,14 +7551,24 @@
         nodeIds.map(function(id){ return '- ' + id; }).join('\n')
       : '';
 
+    // Validasi: kalau query masih terlalu generik, warning
+    var isGenericQuery = !ctx.target_group && !ctx.activities;
+    if (isGenericQuery) {
+      console.warn('[EVIDENCE] Query generator tidak punya program context — hasil mungkin generik');
+    }
+
     var msg = await _gptCall(
       'Kamu adalah query generator untuk Evidence Agent SROI Indonesia.\n' +
       instruction + '\n\n' +
+      'ATURAN KERAS:\n' +
+      '- Query HARUS mengandung konteks target group dan program aktif\n' +
+      '- DILARANG query lintas sektor yang tidak relevan (contoh: farmers, elderly jika program untuk nelayan)\n' +
+      '- Jika query tidak bisa dibuat spesifik, tulis "SKIP: [alasan]"\n\n' +
       'OUTPUT FORMAT:\n' +
       '[NODE_ID] → [query bahasa Inggris]\n' +
       'Satu baris per node. Tidak ada penjelasan, tidak ada preamble.',
       [{ role: 'user', content: 'Input: ' + rawQuery + ctxStr + nodeCtx }],
-      null, null, 400
+      null, null, 500
     );
     return msg && msg.content ? msg.content.trim() : rawQuery;
   }
@@ -7985,9 +8070,78 @@
           '  MON-[ASPEK]-INT (dari laporan internal, placeholder angka)\n' +
           '  MON-[ASPEK]-PRX (estimasi proxy, butuh evidence)\n' +
           'Evidence Agent akan dipanggil dulu sebelum MON-PRX dibuat.\n' +
-          'Panggil checkpoint() setelah selesai.',
+          'Panggil checkpoint(summary:"...", current_cluster:"monetisation") setelah selesai.',
         ids: [],
         needs_evidence: true
+      },
+
+      'adj_ddat': {
+        task: (function() {
+          // Bangun daftar MON-PRX yang ada untuk dijadikan anchor ADJ
+          var ont = activeDraft();
+          var monPrxNodes = (ont && ont.monetisation_pre_fix_nodes || [])
+            .filter(function(n){ return n && n._mon_source_type === 'proxy'; });
+          var monPrxList = monPrxNodes.map(function(n){
+            return '  ' + n.id + ': "' + (n.label||n.aspect||n.id) + '"';
+          }).join('\n');
+
+          return 'Bangun ADJ (Impact Adjustment) nodes untuk setiap MON-PRX.\n' +
+            'PRINSIP: 1 ADJ node = 1 source_monetisation_id (per aspek, bukan global).\n\n' +
+            'MON-PRX nodes yang perlu ADJ:\n' + (monPrxList || '  (baca dari existing_nodes)') + '\n\n' +
+            'Untuk setiap ADJ node, WAJIB isi field berikut di extra_fields:\n' +
+            '  source_monetisation_id: "MON-EFF-PRX"  ← ID MON-PRX yang di-adjust\n' +
+            '  deadweight:   0.15  ← proporsi yg terjadi tanpa program (0-1)\n' +
+            '  attribution:  0.70  ← proporsi yg bisa diklaim program (0-1)\n' +
+            '  displacement: 0.05  ← proporsi manfaat yg menggeser pihak lain (0-1)\n' +
+            '  drop_off:     0.10  ← penurunan dampak per tahun (0-1)\n' +
+            '  net_multiplier: [AKAN DIHITUNG OTOMATIS — isi 0, sistem akan kalkulasi]\n' +
+            '  multiplier_formula_trace: "attribution * (1-deadweight) * (1-displacement) * (1-drop_off)"\n\n' +
+            'ATURAN NILAI DDAT:\n' +
+            '- Nilai harus berdasarkan konteks program aktif dan evidence yang tersedia\n' +
+            '- Deadweight rendah jika akses bengkel kapal lokal sebelumnya sangat terbatas\n' +
+            '- Attribution sedang-tinggi jika program adalah satu-satunya intervensi di area tsb\n' +
+            '- Displacement rendah jika tidak ada bengkel yang digantikan\n' +
+            '- Drop-off sedang untuk keterampilan teknis (butuh refresh), rendah untuk aset fisik\n\n' +
+            'Setelah semua ADJ dibuat, panggil update_node untuk setiap MON-PRX terkait:\n' +
+            '  update_node(collection:"monetisation_pre_fix_nodes", node_id:"MON-EFF-PRX",\n' +
+            '    patch:{ net_multiplier: [ambil dari ADJ node yang baru dibuat] })\n\n' +
+            'Panggil checkpoint(summary:"...", current_cluster:"adj_ddat") setelah selesai.';
+        })(),
+        ids: [],
+        needs_evidence: true,
+        evidence_type: 'ddat_justification'
+      },
+
+      'final_value': {
+        task: (function() {
+          var ont = activeDraft();
+          // Tentukan MON nodes yang sudah di-accept (selected_for_valuation)
+          var selectedMon = (ont && ont.monetisation_pre_fix_nodes || [])
+            .filter(function(n){ return n && n._candidate_status === 'accepted'; });
+          var monList = selectedMon.map(function(n){
+            return '  ' + n.id + ' (' + (n._mon_source_type||'?') + '): "' + (n.label||n.id) + '"';
+          }).join('\n');
+          var years = (ont && ont.final_value_aggregates || []).map(function(f){ return f && f.year; }).filter(Boolean);
+          if (!years.length) years = [new Date().getFullYear()];
+
+          return 'Bangun Final Value nodes dari monetisation nodes yang sudah di-approve.\n\n' +
+            'MON nodes yang sudah accepted (selected_for_valuation):\n' +
+            (monList || '  (baca dari existing_nodes — ambil yang candidate_status=accepted)') + '\n\n' +
+            'ATURAN FV:\n' +
+            '- FV node ID format: FV_[TAHUN]_[MON-ID] (contoh: FV_2024_MON-EFF-PRX)\n' +
+            '- Buat FV node untuk setiap tahun × setiap MON node yang accepted\n' +
+            '- Tahun yang perlu dicover: ' + years.join(', ') + '\n' +
+            '- extra_fields yang wajib diisi:\n' +
+            '    origin_year: [tahun]\n' +
+            '    source_monetisation_id: "[MON-ID]"\n' +
+            '    gross_value: [baca dari MON node — kalau kosong, isi 0 sebagai placeholder]\n' +
+            '    net_multiplier: [baca dari ADJ node terkait — atau dari MON-PRX.net_multiplier]\n' +
+            '    net_value_computed: [gross_value × net_multiplier — AKAN DIHITUNG OTOMATIS]\n\n' +
+            'Setelah semua FV nodes dibuat, panggil compute_fva(years:[' + years.join(',') + ']).\n' +
+            'Panggil checkpoint(summary:"...", current_cluster:"final_value") setelah selesai.';
+        })(),
+        ids: [],
+        no_evidence: true
       }
     };
 
@@ -8034,15 +8188,60 @@
     var evidencePackets = [];
     if (brief.needs_evidence) {
       agentLog('orchestrator', 'evidence', 'Mencari evidence untuk ' + clusterName);
-      agentUpdateModeBar('building', '🔍 Evidence Agent', 'Mencari proxy basis...');
-      var evResult = await runEvidenceAgent({
-        type: 'proxy_basis',
-        query: 'proxy value monetization ' + (ctx.target_group||'') + ' ' + (ctx.activities||[]).join(' '),
-        node_ids: brief.planned_ids.filter(function(id){ return id.includes('PRX'); }),
-        max_per_node: 2,
-        program_context: ctx
-      });
-      evidencePackets = evResult.packets || [];
+      agentUpdateModeBar('building', '🔍 Evidence Agent', 'Mencari evidence...');
+
+      if (clusterName === 'adj_ddat') {
+        // Sprint 2A: DDAT evidence per faktor — bukan satu query generik
+        var ont3 = activeDraft();
+        var monPrxNodes = (ont3 && ont3.monetisation_pre_fix_nodes || [])
+          .filter(function(n){ return n && n._mon_source_type === 'proxy'; });
+
+        // 4 faktor × per aspek MON-PRX
+        var ddatFactors = ['deadweight', 'attribution', 'displacement', 'drop_off'];
+        var allDdatPackets = [];
+
+        for (var fi = 0; fi < ddatFactors.length; fi++) {
+          var factor = ddatFactors[fi];
+          var ddatNodeIds = monPrxNodes.map(function(n){ return 'ADJ-' + n.id.replace('MON-','').replace('-PRX','') + '-' + factor.toUpperCase().slice(0,2); });
+
+          var ddatResult = await runEvidenceAgent({
+            type:            'ddat_justification',
+            query:           factor + ' for ' + (ctx.target_group||'') + ' program ' + (ctx.activities||[]).join(', '),
+            node_ids:        ddatNodeIds,
+            max_per_node:    1,
+            program_context: ctx
+          });
+          allDdatPackets = allDdatPackets.concat(ddatResult.packets || []);
+        }
+        evidencePackets = allDdatPackets;
+
+      } else {
+        // Monetisation: query dari foundation
+        var foundation2 = _buildAcceptedFoundation();
+        var outcomeLabels = foundation2.outcomes.map(function(o){ return o.label; }).join(', ');
+        var problemLabels = foundation2.problems.slice(0,2).map(function(p){ return p.label; }).join(', ');
+        var monQuery = 'What is the economic value of: ' + outcomeLabels +
+          ' for ' + (ctx.target_group || '') +
+          ' through ' + (Array.isArray(ctx.activities) ? ctx.activities.join(', ') : (ctx.activities||'')) +
+          ' in ' + (ctx.location || 'Indonesia') + '?' +
+          ' Context: ' + problemLabels;
+
+        var monPrxIds = brief.planned_ids.filter(function(id){ return id.includes('PRX'); });
+        if (!monPrxIds.length) {
+          monPrxIds = (activeDraft() && activeDraft().monetisation_pre_fix_nodes || [])
+            .filter(function(n){ return n && n._mon_source_type === 'proxy'; })
+            .map(function(n){ return n.id; });
+        }
+
+        var evResult = await runEvidenceAgent({
+          type:            'proxy_basis',
+          query:           monQuery,
+          node_ids:        monPrxIds,
+          max_per_node:    2,
+          program_context: ctx
+        });
+        evidencePackets = evResult.packets || [];
+      }
 
       // Simpan ke run state
       evidencePackets.forEach(function(p) {
@@ -8616,17 +8815,49 @@
     if (scope === 'full' || scope === 'monetisation') {
       (ont.monetisation_pre_fix_nodes||[]).forEach(function(mn) {
         if (!mn) return;
-        // net_multiplier hanya wajib untuk PRX nodes (internal_report boleh kosong)
-        if (mn._mon_source_type === 'proxy' && !mn.net_multiplier) {
-          flags.push({ node_id: mn.id, severity: 'error', message: 'net_multiplier kosong — wajib untuk MON proxy node' });
-        } else if (!mn._mon_source_type && !mn.net_multiplier) {
-          flags.push({ node_id: mn.id, severity: 'warning', message: 'net_multiplier kosong' });
+        var monType = mn._mon_source_type || '';
+
+        if (monType === 'proxy') {
+          // MON-PRX: wajib punya net_multiplier dan evidence
+          if (!mn.net_multiplier) {
+            flags.push({ node_id: mn.id, severity: 'error',
+              message: 'net_multiplier kosong — wajib untuk MON proxy node (butuh ADJ cluster)' });
+          }
+          if (!(mn._agent_evidence && mn._agent_evidence.length)) {
+            flags.push({ node_id: mn.id, severity: 'warning',
+              message: 'MON proxy node tanpa evidence' });
+          }
+        } else if (monType === 'internal_report') {
+          // MON-INT: placeholder — net_multiplier tidak wajib, hanya info
+          // Tidak di-flag apapun kecuali kalau dipilih sebagai selected_for_valuation
+          if (mn._candidate_status === 'accepted' && !mn.gross_value && !mn.amount_idr) {
+            flags.push({ node_id: mn.id, severity: 'warning',
+              message: 'MON internal accepted tapi belum ada nilai gross — isi dari laporan program' });
+          }
+        } else {
+          // Tidak ada tipe — flag warning
+          flags.push({ node_id: mn.id, severity: 'warning',
+            message: 'mon_source_type tidak diset (gunakan internal_report atau proxy)' });
         }
-        if (!(mn._agent_evidence && mn._agent_evidence.length) && mn._mon_source_type === 'proxy') {
-          flags.push({ node_id: mn.id, severity: 'warning', message: 'MON proxy node tanpa evidence' });
-        }
+
         var ver = activeRun().pendingVerifications.find(function(v){ return v.node_id === mn.id && v.status === 'pending'; });
         if (ver) flags.push({ node_id: mn.id, severity: 'info', message: 'Menunggu verifikasi: ' + ver.question });
+      });
+
+      // QA untuk FV nodes
+      (ont.final_value_nodes||[]).forEach(function(fv) {
+        if (!fv) return;
+        if (!fv.net_multiplier) flags.push({ node_id: fv.id, severity: 'error', message: 'FV node tidak punya net_multiplier' });
+        if (!fv.gross_value && fv.gross_value !== 0) flags.push({ node_id: fv.id, severity: 'warning', message: 'FV node belum punya gross_value dari laporan' });
+        if (!fv.net_value_computed) flags.push({ node_id: fv.id, severity: 'warning', message: 'net_value_computed belum dihitung' });
+      });
+
+      // QA untuk ADJ nodes — pastikan kalkulasi lengkap
+      (ont.impact_adjustment_nodes||[]).forEach(function(adj) {
+        if (!adj) return;
+        if (!adj.source_monetisation_id) flags.push({ node_id: adj.id, severity: 'error', message: 'ADJ node tidak punya source_monetisation_id' });
+        if (!adj.net_multiplier) flags.push({ node_id: adj.id, severity: 'error', message: 'ADJ node net_multiplier kosong — cek nilai DDAT' });
+        if (!adj.multiplier_formula_trace) flags.push({ node_id: adj.id, severity: 'warning', message: 'multiplier_formula_trace kosong — audit trail tidak ada' });
       });
     }
     if (scope === 'full' || scope === 'relations') {
@@ -9350,17 +9581,39 @@
     var ont = activeDraft();
     if (!ont) return;
 
+    // Sprint 2C: QA gate — jalankan QA dulu sebelum commit
+    var qaFlags = agentRunQALogic('full');
+    var errors   = qaFlags.filter(function(f){ return f.severity === 'error'; });
+    var warnings = qaFlags.filter(function(f){ return f.severity === 'warning'; });
+
+    if (errors.length > 0) {
+      // Blok commit — tampilkan errors
+      var errorList = errors.map(function(f){ return '• [' + f.node_id + '] ' + f.message; }).join('\n');
+      agentAppendBubble('agent',
+        '⛔ <strong>Commit diblokir — ' + errors.length + ' QA error harus diselesaikan dulu:</strong>\n' + errorList);
+      agentUpdateModeBar('reviewing', 'Commit Diblokir', errors.length + ' error');
+      return;
+    }
+
+    if (warnings.length > 0) {
+      // Warning — tampilkan modal konfirmasi
+      var warnList = warnings.map(function(f){ return '• [' + f.node_id + '] ' + f.message; }).join('\n');
+      var confirmed = window.confirm(
+        '⚠ Ada ' + warnings.length + ' QA warning:\n\n' + warnList + '\n\nLanjut commit?'
+      );
+      if (!confirmed) return;
+    }
+
     var pending = activeRun().pendingVerifications.filter(function(v){ return v.status==='pending'; });
     var allCards = document.querySelectorAll('#agentCardsScroll .agent-node-card');
     var approvedCards = document.querySelectorAll('#agentCardsScroll .agent-node-card.approved');
     var flaggedCards = document.querySelectorAll('#agentCardsScroll .agent-node-card.flagged');
     var draftCards = document.querySelectorAll('#agentCardsScroll .agent-node-card.draft');
 
-    // Hitung stats untuk diff
-    var totalNodes = allCards.length;
+    var totalNodes    = allCards.length;
     var approvedCount = approvedCards.length;
-    var flaggedCount = flaggedCards.length;
-    var draftCount = draftCards.length;
+    var flaggedCount  = flaggedCards.length;
+    var draftCount    = draftCards.length;
 
     // Hitung node per collection
     var colStats = {};
