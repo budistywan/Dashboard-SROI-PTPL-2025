@@ -6746,8 +6746,32 @@
         }
 
         // Sprint 2B: Auto-kalkulasi net_value_computed untuk final_value_nodes
-        if (col === 'final_value_nodes' && data.gross_value !== undefined && data.net_multiplier !== undefined) {
-          data.net_value_computed = Math.round(parseFloat(data.gross_value) * parseFloat(data.net_multiplier));
+        if (col === 'final_value_nodes') {
+          // Set default gross_value dari recommended kalau belum diisi
+          if (!data.gross_value && data.gross_value_recommended) {
+            data.gross_value = data.gross_value_recommended.recommended || 0;
+          }
+          // Default status
+          if (!data.gross_value_status) {
+            data.gross_value_status = data.gross_value ? 'recommended' : 'missing';
+          }
+          // Default fallback range kalau Mapper tidak mengisi
+          if (!data.gross_value_recommended && data.gross_value) {
+            data.gross_value_recommended = {
+              min:         Math.round(data.gross_value * 0.75),
+              recommended: data.gross_value,
+              max:         Math.round(data.gross_value * 1.25)
+            };
+          } else if (!data.gross_value_recommended) {
+            data.gross_value_recommended = { min: 0, recommended: 0, max: 0 };
+            data.gross_value_status = 'missing';
+          }
+          // Kalkulasi net_value_computed
+          if (data.gross_value && data.net_multiplier) {
+            data.net_value_computed = Math.round(parseFloat(data.gross_value) * parseFloat(data.net_multiplier));
+          } else {
+            data.net_value_computed = 0;
+          }
         }
 
         // Guard 4: candidate_status
@@ -8117,28 +8141,50 @@
       'final_value': {
         task: (function() {
           var ont = activeDraft();
-          // Tentukan MON nodes yang sudah di-accept (selected_for_valuation)
           var selectedMon = (ont && ont.monetisation_pre_fix_nodes || [])
             .filter(function(n){ return n && n._candidate_status === 'accepted'; });
+          // Fallback: ambil semua MON-PRX kalau belum ada yang accepted
+          if (!selectedMon.length) {
+            selectedMon = (ont && ont.monetisation_pre_fix_nodes || [])
+              .filter(function(n){ return n && n._mon_source_type === 'proxy'; });
+          }
           var monList = selectedMon.map(function(n){
-            return '  ' + n.id + ' (' + (n._mon_source_type||'?') + '): "' + (n.label||n.id) + '"';
+            var adj = (ont && ont.impact_adjustment_nodes || [])
+              .find(function(a){ return a && a.source_monetisation_id === n.id; });
+            return '  ' + n.id + ': "' + (n.label||n.id) + '"'
+              + (adj ? ' → net_multiplier: ' + adj.net_multiplier : '');
           }).join('\n');
-          var years = (ont && ont.final_value_aggregates || []).map(function(f){ return f && f.year; }).filter(Boolean);
+          var years = (activeCtx() && activeCtx().years) ||
+            (ont && ont.ontology_meta && ont.ontology_meta.execution_years) || [];
           if (!years.length) years = [new Date().getFullYear()];
 
           return 'Bangun Final Value nodes dari monetisation nodes yang sudah di-approve.\n\n' +
-            'MON nodes yang sudah accepted (selected_for_valuation):\n' +
-            (monList || '  (baca dari existing_nodes — ambil yang candidate_status=accepted)') + '\n\n' +
+            'MON nodes yang menjadi sumber FV:\n' +
+            (monList || '  (baca dari existing_nodes monetisation_pre_fix_nodes)') + '\n\n' +
             'ATURAN FV:\n' +
             '- FV node ID format: FV_[TAHUN]_[MON-ID] (contoh: FV_2024_MON-EFF-PRX)\n' +
             '- Buat FV node untuk setiap tahun × setiap MON node yang accepted\n' +
-            '- Tahun yang perlu dicover: ' + years.join(', ') + '\n' +
-            '- extra_fields yang wajib diisi:\n' +
-            '    origin_year: [tahun]\n' +
-            '    source_monetisation_id: "[MON-ID]"\n' +
-            '    gross_value: [baca dari MON node — kalau kosong, isi 0 sebagai placeholder]\n' +
-            '    net_multiplier: [baca dari ADJ node terkait — atau dari MON-PRX.net_multiplier]\n' +
-            '    net_value_computed: [gross_value × net_multiplier — AKAN DIHITUNG OTOMATIS]\n\n' +
+            '- Tahun yang perlu dicover: ' + years.join(', ') + '\n\n' +
+            'extra_fields yang WAJIB diisi di setiap FV node:\n' +
+            '  origin_year: [tahun]\n' +
+            '  source_monetisation_id: "[MON-ID]"\n' +
+            '  net_multiplier: [baca dari ADJ node terkait]\n' +
+            '  net_value_computed: 0  ← akan dihitung otomatis dari gross × multiplier\n' +
+            '  gross_value_status: "recommended"  ← selalu "recommended" saat build\n' +
+            '  gross_value_recommended: {\n' +
+            '    min: [estimasi konservatif dalam Rp — berdasarkan evidence MON-PRX],\n' +
+            '    recommended: [estimasi tengah yang paling defensible],\n' +
+            '    max: [estimasi optimistik tapi masih reasonable]\n' +
+            '  }\n' +
+            '  gross_value_basis: "[jelaskan dasar estimasi — contoh: estimasi dari penghematan biaya perawatan Rp X/bulan × Y nelayan]"\n' +
+            '  gross_value_confidence: "low|medium|high"  ← low jika evidence lemah, high jika ada data konkret\n' +
+            '  gross_value: [isi dengan nilai recommended sebagai default]\n\n' +
+            'ATURAN ESTIMASI RANGE:\n' +
+            '- Gunakan evidence dari MON-PRX node sebagai basis\n' +
+            '- Kalikan dengan jumlah beneficiary yang disebutkan di program context\n' +
+            '- min = skenario konservatif (50-75% dari recommended)\n' +
+            '- max = skenario optimistik (125-150% dari recommended)\n' +
+            '- Kalau evidence tidak punya angka konkret, set confidence: "low"\n\n' +
             'Setelah semua FV nodes dibuat, panggil compute_fva(years:[' + years.join(',') + ']).\n' +
             'Panggil checkpoint(summary:"...", current_cluster:"final_value") setelah selesai.';
         })(),
@@ -9063,9 +9109,70 @@
         + '</div></div>';
     }
 
-    var label = data.label || data.name || data.aspect || data.indicator || nodeId;
+    // Slider gross_value untuk final_value_nodes (Opsi C)
+    var sliderHtml = '';
+    if (col === 'final_value_nodes' && data.gross_value_recommended) {
+      var gvRec   = data.gross_value_recommended;
+      var gvMin   = gvRec.min   || 0;
+      var gvMid   = gvRec.recommended || 0;
+      var gvMax   = gvRec.max   || 0;
+      var gvCur   = data.gross_value || gvMid;
+      var gvStat  = data.gross_value_status || 'missing';
+      var gvConf  = data.gross_value_confidence || 'low';
+      var gvBasis = data.gross_value_basis || '';
 
-    // Guard 4: candidate_status badge
+      // Badge status
+      var gvBadgeText  = gvStat === 'recommended'      ? '⚡ Rekomendasi Agent'
+                       : gvStat === 'adjusted_by_user' ? '✏ Disesuaikan'
+                       : gvStat === 'from_report'      ? '✓ Dari Laporan'
+                       : '⚠ Belum Diisi';
+      var gvBadgeColor = gvStat === 'recommended'      ? '#f59e0b'
+                       : gvStat === 'adjusted_by_user' ? '#6366f1'
+                       : gvStat === 'from_report'      ? '#059669'
+                       : '#dc2626';
+
+      // Confidence badge
+      var confText  = gvConf === 'high' ? '● Tinggi' : gvConf === 'medium' ? '● Sedang' : '● Rendah';
+      var confColor = gvConf === 'high' ? '#059669' : gvConf === 'medium' ? '#d97706' : '#dc2626';
+
+      // Format angka
+      var fmtRp = function(v){ return 'Rp ' + (v/1e6).toFixed(1) + 'jt'; };
+      var nm     = data.net_multiplier || 0;
+      var netVal = Math.round(gvCur * nm);
+
+      sliderHtml = '<div style="margin:8px 13px;padding:10px 12px;background:#fafafa;border:1.5px solid #e2e8f0;border-radius:8px;">'
+        + '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">'
+        + '<span style="font-size:11px;font-weight:800;color:#374151;">💰 Gross Value</span>'
+        + '<span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:12px;background:' + gvBadgeColor + '20;color:' + gvBadgeColor + ';">' + gvBadgeText + '</span>'
+        + '</div>'
+        // Slider
+        + '<input type="range" min="' + gvMin + '" max="' + gvMax + '" step="' + Math.max(1, Math.round((gvMax-gvMin)/100)) + '" value="' + gvCur + '" '
+        + 'style="width:100%;margin:4px 0;accent-color:#2563eb;" '
+        + 'oninput="agentFVSliderUpdate(\'' + nodeId + '\',this.value)" />'
+        // Tick labels
+        + '<div style="display:flex;justify-content:space-between;font-size:10px;color:#94a3b8;margin-bottom:4px;">'
+        + '<span>' + fmtRp(gvMin) + '</span>'
+        + '<span style="color:#2563eb;font-weight:700;">' + fmtRp(gvMid) + ' (rec)</span>'
+        + '<span>' + fmtRp(gvMax) + '</span>'
+        + '</div>'
+        // Current value display
+        + '<div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px;">'
+        + '<div>'
+        + '<span style="font-size:12px;font-weight:800;color:#1e293b;" id="fv-gross-' + nodeId + '">Rp ' + gvCur.toLocaleString('id-ID') + '</span>'
+        + '<span style="font-size:10px;color:#94a3b8;margin-left:6px;">× ' + nm + ' = </span>'
+        + '<span style="font-size:12px;font-weight:700;color:#059669;" id="fv-net-' + nodeId + '">Rp ' + netVal.toLocaleString('id-ID') + '</span>'
+        + '</div>'
+        + '<span style="font-size:10px;color:' + confColor + ';">' + confText + '</span>'
+        + '</div>'
+        // Override manual
+        + (gvBasis ? '<div style="font-size:10px;color:#94a3b8;margin-top:4px;font-style:italic;">' + esc(gvBasis.slice(0,80)) + (gvBasis.length>80?'…':'') + '</div>' : '')
+        + '<div style="display:flex;gap:6px;margin-top:8px;">'
+        + '<button onclick="agentFVSetFromReport(\'' + nodeId + '\')" style="flex:1;padding:5px;background:white;border:1.5px solid #059669;border-radius:6px;font-size:10px;font-weight:700;color:#059669;cursor:pointer;">✓ Isi dari Laporan</button>'
+        + '</div>'
+        + '</div>';
+    }
+
+    var label = data.label || data.name || data.aspect || data.indicator || nodeId;
     var candidateStatus = data._candidate_status || null;
     var statusBadgeText = status === 'approved' ? '✓ Approved' : status === 'flagged' ? '⚠ Flagged' : 'Draft';
     var statusBadgeStyle = '';
@@ -9126,6 +9233,7 @@
       + (fieldsHtml ? '<div class="anc-content">'+fieldsHtml+'</div>' : '')
       + (reasoning ? '<div class="anc-reasoning"><div class="anc-reasoning-label">💭 Reasoning</div>'+esc(reasoning)+'</div>' : '')
       + bindingHtml
+      + sliderHtml
       + evidHtml
       + verHtml
       + '<div class="anc-actions">'
@@ -10115,6 +10223,79 @@
     agentUpdateCommitBar();
   };
 
+  // ── FV Slider handlers ───────────────────────────────────────────────
+  window.agentFVSliderUpdate = function(nodeId, newValue) {
+    var ont  = activeDraft();
+    if (!ont) return;
+    var node = (ont.final_value_nodes||[]).find(function(n){ return n && n.id === nodeId; });
+    if (!node) return;
+
+    var gv = parseFloat(newValue);
+    node.gross_value         = gv;
+    node.net_value_computed  = Math.round(gv * (node.net_multiplier || 0));
+    node.gross_value_status  = 'adjusted_by_user';
+
+    // Update display in-place
+    var grossEl = document.getElementById('fv-gross-' + nodeId);
+    var netEl   = document.getElementById('fv-net-'   + nodeId);
+    if (grossEl) grossEl.textContent = 'Rp ' + gv.toLocaleString('id-ID');
+    if (netEl)   netEl.textContent   = 'Rp ' + node.net_value_computed.toLocaleString('id-ID');
+
+    // Recalculate FVA real-time
+    _recalcFVA();
+  };
+
+  window.agentFVSetFromReport = function(nodeId) {
+    var ont  = activeDraft();
+    if (!ont) return;
+    var node = (ont.final_value_nodes||[]).find(function(n){ return n && n.id === nodeId; });
+    if (!node) return;
+
+    var input = window.prompt(
+      'Masukkan gross value dari laporan untuk ' + nodeId + ' (dalam Rupiah, tanpa titik/koma):',
+      node.gross_value || ''
+    );
+    if (input === null) return; // user cancel
+
+    var gv = parseFloat(input.replace(/[^0-9]/g,''));
+    if (isNaN(gv) || gv < 0) { alert('Nilai tidak valid.'); return; }
+
+    node.gross_value         = gv;
+    node.net_value_computed  = Math.round(gv * (node.net_multiplier || 0));
+    node.gross_value_status  = 'from_report';
+
+    // Re-render card
+    agentRenderCard(nodeId, 'final_value_nodes', node, node._agent_reasoning, []);
+
+    // Recalculate FVA
+    _recalcFVA();
+    agentAppendBubble('agent', '✓ <strong>' + nodeId + '</strong> gross value diperbarui dari laporan: Rp ' + gv.toLocaleString('id-ID'));
+  };
+
+  // Recalculate FVA dari semua FV nodes tanpa rebuild cluster
+  function _recalcFVA() {
+    var ont = activeDraft();
+    if (!ont) return;
+    var fvNodes = ont.final_value_nodes || [];
+    var byYear  = {};
+
+    fvNodes.forEach(function(fv) {
+      if (!fv) return;
+      var yr = fv.origin_year || fv.year;
+      if (!yr) return;
+      if (!byYear[yr]) byYear[yr] = 0;
+      byYear[yr] += (fv.net_value_computed || 0);
+    });
+
+    // Update existing FVA nodes
+    (ont.final_value_aggregates || []).forEach(function(fva) {
+      if (!fva) return;
+      var yr = fva.year;
+      if (byYear[yr] !== undefined) fva.amount_idr = byYear[yr];
+    });
+
+    agentUpdateCommitBar();
+  }
   window.agentPropagateChange = function() {
     if (!activeRun().lastImpact) return;
     agentContinueBuildWithMessage('Propagate perubahan ke downstream nodes: ' + activeRun().lastImpact.downstream_ids.join(', '));
