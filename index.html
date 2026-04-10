@@ -7607,9 +7607,29 @@
       }
     }
 
-    var existingCtx = task.existing_nodes && (
-      (task.existing_nodes.problem_ids||[]).length || (task.existing_nodes.outcome_ids||[]).length)
-      ? '\n\nNODE SUDAH ADA (jangan duplikat): ' + JSON.stringify(task.existing_nodes)
+    // Fix 1: existingCtx menampilkan id+label agar Mapper bisa semantic matching
+    var existingParts = [];
+    if (task.existing_nodes) {
+      var en = task.existing_nodes;
+      if (en.problem_ids && en.problem_ids.length)
+        existingParts.push('problem_ids: ' + JSON.stringify(en.problem_ids));
+      if (en.outcome_ids && en.outcome_ids.length)
+        existingParts.push('outcome_ids: ' + JSON.stringify(en.outcome_ids));
+      if (en.activity_nodes && en.activity_nodes.length)
+        existingParts.push('activity_nodes (id+label):\n' +
+          en.activity_nodes.map(function(a){ return '  ' + a.id + ': "' + a.label + '"'; }).join('\n'));
+      if (en.stakeholder_nodes && en.stakeholder_nodes.length)
+        existingParts.push('stakeholder_nodes (id+label):\n' +
+          en.stakeholder_nodes.map(function(s){ return '  ' + s.id + ': "' + s.label + '"'; }).join('\n'));
+      if (en.output_delivery_nodes && en.output_delivery_nodes.length)
+        existingParts.push('output_delivery_nodes (id+label):\n' +
+          en.output_delivery_nodes.map(function(o){ return '  ' + o.id + ': "' + o.label + '"'; }).join('\n'));
+      if (en.indicator_nodes && en.indicator_nodes.length)
+        existingParts.push('indicator_nodes (id+label):\n' +
+          en.indicator_nodes.map(function(i){ return '  ' + i.id + ': "' + i.label + '"'; }).join('\n'));
+    }
+    var existingCtx = existingParts.length
+      ? '\n\nNODE SUDAH ADA (jangan duplikat, gunakan id+label untuk semantic matching):\n' + existingParts.join('\n')
       : '';
 
     var systemPrompt = 'Kamu adalah Ontology Mapper Agent untuk SROI/TJSL program CSR Indonesia.\n\n' +
@@ -7620,6 +7640,14 @@
       '- DILARANG: "Pelatihan Keterampilan", "Pemberdayaan Usaha Mikro", "Peningkatan Kapasitas", "Activity 1"\n' +
       '- Setiap label harus menyebut SIAPA, MELAKUKAN APA, UNTUK APA\n' +
       '- Contoh BENAR: "Pelatihan Perawatan Mesin Kapal dan Penggunaan Pelumas Pertamina"\n\n' +
+      'ATURAN CHAIN MINIMUM SROI — WAJIB:\n' +
+      'Chain yang harus terbentuk: PROB → ACT → OD → OC → MON\n' +
+      'Relasi yang WAJIB dibuat pada cluster yang relevan:\n' +
+      '  problem_to_activity         (dari ACT ke PROB yang dijawab)\n' +
+      '  activity_to_output_delivery (dari ACT ke OD yang dihasilkan — pilih semantik, bukan all-to-all)\n' +
+      '  output_delivery_to_outcome  (dari OD ke OC yang dituju)\n' +
+      '  indicator_to_monetisation   (dari IND ke MON)\n' +
+      'Jika relasi ini tidak ada, QA akan flag error dan chain tidak bisa di-commit.\n\n' +
       'ATURAN VULNERABILITY ANCHOR — WAJIB untuk setiap problem_node:\n' +
       '- Setiap create_node untuk problem_nodes WAJIB menyertakan vulnerability_anchor di extra_fields\n' +
       '- Format:\n' +
@@ -7893,14 +7921,24 @@
       },
       'output_delivery': {
         task: 'Bangun candidate cards untuk cluster OUTPUT DELIVERY.\n' +
-          'Output adalah hasil langsung dan terukur dari activity.\n' +
-          'Harus logis sebagai hasil dari activity yang sudah dibangun.\n' +
+          'Output adalah hasil langsung dan terukur dari activity yang sudah ada.\n' +
           'GOOD: "100 nelayan terlatih perawatan mesin kapal dengan pelumas Pertamina"\n' +
           'BAD:  "Output 1", "Hasil Kegiatan"\n\n' +
-          'WAJIB setelah create_node output_delivery:\n' +
-          '  link_nodes(relation_key:"output_delivery_to_outcome", from_id:"OD-01", to_ids:["OC-ECO-01","OC-SOC-01"])\n' +
-          'Setiap output_delivery node HARUS terhubung ke outcome yang relevan.\n' +
-          'Tanpa relasi ini, chain SROI putus dan tidak bisa commit.\n' +
+          'URUTAN WAJIB setelah create_node setiap OD node:\n\n' +
+          'LANGKAH 1 — Tentukan activity mana yang menghasilkan OD ini:\n' +
+          '  - Baca daftar activity dari existing_nodes.activity_nodes (berisi id + label)\n' +
+          '  - Pilih HANYA activity yang secara semantik relevan dengan OD ini\n' +
+          '  - JANGAN hubungkan semua activity ke semua OD secara otomatis\n' +
+          '  - Gunakan banyak upstream activity HANYA jika OD memang gabungan lebih dari satu activity\n' +
+          '  - Contoh:\n' +
+          '    OD "100 nelayan terlatih mesin kapal" → upstream: ACT "Pelatihan Mesin Kapal" saja\n' +
+          '    OD "bengkel kapal beroperasi" → upstream: ACT "Pelatihan" + ACT "Pembekalan Kewirausahaan"\n\n' +
+          'LANGKAH 2 — Hubungkan ACTIVITY → OUTPUT DELIVERY:\n' +
+          '  link_nodes(relation_key:"activity_to_output_delivery", from_id:"ACT-XX", to_ids:["OD-XX"])\n' +
+          '  PENTING: from_id = activity yang relevan, to_ids = OD yang dihasilkan\n\n' +
+          'LANGKAH 3 — Hubungkan OUTPUT DELIVERY → OUTCOME:\n' +
+          '  link_nodes(relation_key:"output_delivery_to_outcome", from_id:"OD-XX", to_ids:["OC-ECO-01","OC-SOC-01"])\n\n' +
+          'Chain wajib: ACT (relevan) → OD → OC. Tanpa kedua relasi ini, chain SROI putus.\n' +
           'Panggil checkpoint(summary:"...", current_cluster:"output_delivery") setelah selesai.',
         ids: ['OD-01', 'OD-02'],
         no_evidence: true
@@ -8012,10 +8050,13 @@
       program_context:  ctx,
       planned_nodes:   { cluster_ids: brief.planned_ids },
       existing_nodes: {
-        problem_ids:   (ont&&ont.problem_nodes||[]).map(function(n){return n.id;}),
-        outcome_ids:   (ont&&ont.outcome_nodes||[]).map(function(n){return n.id;}),
-        activity_ids:  (ont&&ont.activity_nodes||[]).map(function(n){return n.id;}),
-        stakeholder_ids:(ont&&ont.stakeholder_nodes||[]).map(function(n){return n.id;})
+        problem_ids:    (ont&&ont.problem_nodes||[]).map(function(n){ return n && n.id; }).filter(Boolean),
+        outcome_ids:    (ont&&ont.outcome_nodes||[]).map(function(n){ return n && n.id; }).filter(Boolean),
+        // Fix 1: kirim {id, label} agar Mapper bisa semantic matching
+        activity_nodes: (ont&&ont.activity_nodes||[]).map(function(n){ return n && { id: n.id, label: n.label||'' }; }).filter(Boolean),
+        stakeholder_nodes: (ont&&ont.stakeholder_nodes||[]).map(function(n){ return n && { id: n.id, label: n.label||'' }; }).filter(Boolean),
+        output_delivery_nodes: (ont&&ont.output_delivery_nodes||[]).map(function(n){ return n && { id: n.id, label: n.label||'' }; }).filter(Boolean),
+        indicator_nodes: (ont&&ont.indicator_nodes||[]).map(function(n){ return n && { id: n.id, label: n.label||'' }; }).filter(Boolean)
       }
     });
 
@@ -8405,8 +8446,9 @@
         mapTask.evidence_packets  = evidencePackets;
         mapTask.program_context   = ctx;  // ← inject program context
         mapTask.existing_nodes = {
-          problem_ids: (ont && ont.problem_nodes||[]).map(function(n){return n.id;}),
-          outcome_ids:  (ont && ont.outcome_nodes||[]).map(function(n){return n.id;})
+          problem_ids:    (ont && ont.problem_nodes||[]).map(function(n){ return n && n.id; }).filter(Boolean),
+          outcome_ids:    (ont && ont.outcome_nodes||[]).map(function(n){ return n && n.id; }).filter(Boolean),
+          activity_nodes: (ont && ont.activity_nodes||[]).map(function(n){ return n && { id: n.id, label: n.label||'' }; }).filter(Boolean)
         };
         var mapResult = await runMapperAgent(mapTask);
 
@@ -8578,8 +8620,23 @@
         Object.values(odMap).forEach(function(arr){ if(arr.indexOf(oc.id)!==-1) hasUpstream=true; });
         if (!hasUpstream) flags.push({
           node_id: oc.id,
-          severity: 'error',  // naik dari warning ke error
+          severity: 'error',
           message: 'Chain putus: outcome tidak punya upstream output_delivery. Wajib ada relasi output_delivery_to_outcome.'
+        });
+      });
+
+      // QA rule baru: output_delivery tanpa upstream activity
+      (ont.output_delivery_nodes||[]).forEach(function(od) {
+        if (!od) return;
+        var hasActivityUpstream = false;
+        var actOdMap = ri2.activity_to_output_delivery || {};
+        Object.values(actOdMap).forEach(function(arr){
+          if (arr.indexOf(od.id) !== -1) hasActivityUpstream = true;
+        });
+        if (!hasActivityUpstream) flags.push({
+          node_id: od.id,
+          severity: 'warning',
+          message: 'Output delivery tidak punya upstream activity — chain ACT→OD belum terbentuk'
         });
       });
 
