@@ -2054,6 +2054,15 @@
       const status = o?.ontology_meta?.status || '';
       const isExp = status.includes('experimental');
       const invAgg = (o?.investment_aggregates||[]).find(a=>a.display_as_primary_summary);
+
+      // Badge status dari agent workflow
+      const recordStatus = r.status || '';
+      const isAgentDraft  = status === 'agent_draft' || recordStatus === 'agent_draft';
+      const isCommitted   = recordStatus === 'committed';
+      const runId         = r.run_id || '';
+      const runYear       = r.year   || '';
+      const runLocation   = r.location ? r.location.split(' ')[0] : '';
+
       return `<div class="record-item ${selected?.id===r.id?'active':''}" data-id="${r.id}">
         <div class="record-name">${esc(r.title||o?.identity?.sub_program||'Tanpa Judul')}</div>
         <div class="record-program">${esc(o?.identity?.program||'-')}</div>
@@ -2061,6 +2070,9 @@
           <span class="badge">${esc(o?.ontology_meta?.ontology_id||'-')}</span>
           ${invAgg ? `<span class="badge green">Rp ${(invAgg.amount_idr/1e6).toFixed(0)}M</span>` : ''}
           ${isExp ? '<span class="badge amber">Exp</span>' : ''}
+          ${isAgentDraft  ? '<span class="badge" style="background:#fef3c7;color:#92400e;border:1px solid #fde68a;">⚠ Draft Agen</span>' : ''}
+          ${isCommitted   ? '<span class="badge" style="background:#f0fdf4;color:#059669;border:1px solid #a7f3d0;">✓ Committed</span>' : ''}
+          ${runYear       ? `<span class="badge" style="background:#f1f5f9;color:#475569;">${esc(String(runYear))}</span>` : ''}
         </div>
       </div>`;
     }).join('');
