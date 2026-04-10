@@ -6711,8 +6711,10 @@
         data._agent_reasoning = args.reasoning || '';
         data._agent_evidence  = args.evidence_ids || [];
 
-        // Guard 4: candidate_status — fase 2 nodes mulai sebagai pending_review
-        data._candidate_status = activeCluster ? 'pending_review' : 'accepted';
+        // Guard 4: candidate_status
+        // Fase 1 (activeCluster null): pending_review — user masih bisa edit sebelum lanjut
+        // Fase 2 (activeCluster aktif): pending_review — user review per cluster
+        data._candidate_status = 'pending_review';
 
         // Guard 2: foundation_binding
         if (args.foundation_binding) {
@@ -7856,10 +7858,16 @@
     allCols.forEach(function(col) {
       (ont[col]||[]).forEach(function(n) {
         if (!n) return;
-        var isAccepted = n._agent_status === 'approved' ||
-                         n._agent_status === 'accepted' ||
-                         !n._agent_status; // node tanpa status = sudah committed
-        if (!isAccepted) return;
+        // Node fase 1 valid sebagai foundation kalau:
+        // - sudah approved/accepted, ATAU
+        // - pending_review (belum di-review user tapi sudah melewati checkpoint fase 1), ATAU
+        // - tidak punya _agent_status (node lama yang sudah committed)
+        var isValidFoundation = n._agent_status === 'approved' ||
+                                n._agent_status === 'accepted' ||
+                                n._candidate_status === 'pending_review' ||
+                                n._candidate_status === 'accepted' ||
+                                !n._agent_status;
+        if (!isValidFoundation) return;
         var entry = {
           id:        n.id,
           label:     n.label || n.name || '',
