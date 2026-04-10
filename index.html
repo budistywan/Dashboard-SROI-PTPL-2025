@@ -6348,7 +6348,9 @@
     if (!clusterState) return 'activity';
     for (var i = 0; i < PHASE2_CLUSTER_ORDER.length; i++) {
       var c = PHASE2_CLUSTER_ORDER[i];
-      if (clusterState[c] !== 'completed') return c;
+      // Kalau key tidak ada di clusterState (run lama) → anggap pending
+      var st = clusterState.hasOwnProperty(c) ? clusterState[c] : 'pending';
+      if (st !== 'completed') return c;
     }
     return null; // semua selesai
   }
@@ -8323,8 +8325,15 @@
 
     agentLog('orchestrator', 'phase2', 'Memulai build cluster-by-cluster');
 
-    // Tentukan cluster mana yang harus dibangun — baca dari clusterState
+    // Patch clusterState untuk run lama yang belum punya adj_ddat/final_value
     var run = activeRun();
+    if (run && run.clusterState) {
+      PHASE2_CLUSTER_ORDER.forEach(function(c) {
+        if (!run.clusterState.hasOwnProperty(c)) {
+          run.clusterState[c] = 'pending';
+        }
+      });
+    }
     var nextCluster = run && run.clusterState
       ? getNextIncompleteCluster(run.clusterState)
       : 'activity';
@@ -10031,6 +10040,13 @@
     var progress = run && run.buildProgress;
     var cs       = run && run.clusterState;
 
+    // Patch clusterState untuk run lama yang belum punya adj_ddat/final_value
+    if (run && cs) {
+      PHASE2_CLUSTER_ORDER.forEach(function(c) {
+        if (!cs.hasOwnProperty(c)) cs[c] = 'pending';
+      });
+    }
+
     // Cek apakah fase 2 sudah dimulai (ada cluster yang in_progress atau completed)
     var phase2Started = cs && PHASE2_CLUSTER_ORDER.some(function(c){
       return cs[c] === 'completed' || cs[c] === 'completed_with_warnings' || cs[c] === 'in_progress';
@@ -10080,7 +10096,16 @@
   window.agentBuildCluster = async function(clusterName) {
     var sendBtn = document.getElementById('agentSendBtn');
     if (sendBtn) sendBtn.disabled = true;
-    agentAppendBubble('user', '▶ Build cluster: ' + clusterName.replace('_',' '));
+    agentAppendBubble('user', '▶ Build cluster: ' + clusterName.replace(/_/g,' '));
+
+    // Patch clusterState untuk run lama
+    var run = activeRun();
+    if (run && run.clusterState) {
+      PHASE2_CLUSTER_ORDER.forEach(function(c) {
+        if (!run.clusterState.hasOwnProperty(c)) run.clusterState[c] = 'pending';
+      });
+    }
+
     try {
       await _buildCluster(clusterName);
     } catch(err) {
